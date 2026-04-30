@@ -4,6 +4,8 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import type { AgentWorkerOptions } from "@excalidraw-agent/shared";
 
+const defaultAgentModel = "gpt-5.3-codex-spark";
+
 const options = parseArgs(process.argv.slice(2));
 const workspace = prepareWorkspace(options);
 
@@ -20,6 +22,7 @@ const codex = new Codex({
 });
 
 const thread = codex.startThread({
+  model: defaultAgentModel,
   workingDirectory: workspace,
   skipGitRepoCheck: true,
 });
