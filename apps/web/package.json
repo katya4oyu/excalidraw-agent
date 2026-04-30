@@ -10,9 +10,9 @@
   },
   "dependencies": {
     "@excalidraw-agent/shared": "workspace:*",
+    "@excalidraw-agent/y-excalidraw-browser": "workspace:*",
     "@excalidraw/excalidraw": "0.18.0",
     "@hocuspocus/provider": "^4.0.0",
-    "@mizuka-wu/y-excalidraw": "^2.0.16",
     "@vitejs/plugin-react": "^5.1.0",
     "vite": "^7.2.4",
     "react": "^18.3.1",

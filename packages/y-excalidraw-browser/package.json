@@ -1,0 +1,23 @@
+{
+  "name": "@excalidraw-agent/y-excalidraw-browser",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@excalidraw-agent/y-excalidraw-core": "workspace:*",
+    "@mizuka-wu/y-excalidraw": "^2.0.16",
+    "yjs": "^13.6.27"
+  },
+  "peerDependencies": {
+    "@excalidraw/excalidraw": "0.18.0",
+    "react": "^18.3.1"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.3"
+  }
+}

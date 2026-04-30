@@ -1,7 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { HocuspocusProvider } from "@hocuspocus/provider";
-import { ExcalidrawBinding } from "@mizuka-wu/y-excalidraw";
 import { toDocumentName } from "@excalidraw-agent/shared";
+import {
+  createAgentFooterStateObserver,
+  ExcalidrawBinding,
+  type AgentFooterState,
+} from "@excalidraw-agent/y-excalidraw-browser";
 import * as Y from "yjs";
 import type { ExcalidrawImperativeAPI } from "@excalidraw/excalidraw/types";
 
@@ -14,6 +18,12 @@ export function useExcalidrawCollab({ fileId, excalidrawElement }: UseExcalidraw
   const [api, setApi] = useState<ExcalidrawImperativeAPI | null>(null);
   const [status, setStatus] = useState("connecting");
   const [binding, setBinding] = useState<ExcalidrawBinding | null>(null);
+  const [agentFooterState, setAgentFooterState] = useState<AgentFooterState>({
+    runStatus: "idle",
+    activeRunCount: 0,
+    proposedCount: 0,
+    ghostElementCount: 0,
+  });
 
   const collabUrl = useMemo(() => {
     if (import.meta.env.VITE_COLLAB_URL) {
@@ -50,6 +60,8 @@ export function useExcalidrawCollab({ fileId, excalidrawElement }: UseExcalidraw
     const ydoc = provider.document;
     const yElements = ydoc.getArray<Y.Map<any>>("elements");
     const yAssets = ydoc.getMap("assets");
+    const yAgentRuns = ydoc.getMap("agentRuns");
+    const yAgentProposals = ydoc.getMap("agentProposals");
     const localOrigin = {};
     const undoManagerOptions = excalidrawElement.querySelector(".undo-redo-buttons")
       ? {
@@ -83,9 +95,24 @@ export function useExcalidrawCollab({ fileId, excalidrawElement }: UseExcalidraw
     provider.on("synced", handleSynced);
 
     setBinding(nextBinding);
+    const destroyAgentFooterStateObserver = createAgentFooterStateObserver(
+      {
+        elements: yElements,
+        agentRuns: yAgentRuns,
+        agentProposals: yAgentProposals,
+      },
+      setAgentFooterState,
+    );
 
     return () => {
       setBinding(null);
+      setAgentFooterState({
+        runStatus: "idle",
+        activeRunCount: 0,
+        proposedCount: 0,
+        ghostElementCount: 0,
+      });
+      destroyAgentFooterStateObserver();
       provider.off("status", handleStatus);
       provider.off("synced", handleSynced);
       nextBinding.destroy();
@@ -95,6 +122,7 @@ export function useExcalidrawCollab({ fileId, excalidrawElement }: UseExcalidraw
 
   return {
     api,
+    agentFooterState,
     binding,
     setApi,
     status,

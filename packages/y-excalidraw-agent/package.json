@@ -1,0 +1,18 @@
+{
+  "name": "@excalidraw-agent/y-excalidraw-agent",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@excalidraw-agent/y-excalidraw-core": "workspace:*",
+    "yjs": "^13.6.27"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.3"
+  }
+}
