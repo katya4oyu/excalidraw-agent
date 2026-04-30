@@ -47,6 +47,7 @@ body {
   display: inline-flex;
   align-items: center;
   gap: 0.625rem;
+  margin: 0 0.75rem;
   padding: 0 1rem;
   border: 1px solid var(--default-border-color);
   border-radius: var(--border-radius-lg);
