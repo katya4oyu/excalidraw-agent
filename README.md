@@ -112,17 +112,37 @@ Portless のルーティング先ポートは起動ごとに変わるため、we
 ```text
 GET  /health
 POST /api/files
+POST /api/files/import
 GET  /api/files/:id
 WS   /collab
 ```
 
 Hocuspocus document name は `file:{fileId}` です。
 
+`POST /api/files/import` はローカル `.excalidraw` の JSON を受け取り、埋め込まれた `excalidrawAgent.fileId` またはリクエストの `fileId` が既存DBにあればその document に復帰します。存在しない場合は、そのIDまたは新規IDで Yjs document を作ります。
+
 ## Data
 
 server の SQLite は開発用に `apps/server/data/` に作られます。このDBファイルは git 管理対象外です。
 
 Codex が作る `.excalidraw` ファイルも git 管理対象外です。
+
+Web UI の `Save` は `.excalidraw` JSON に次のメタデータを埋め込みます。`Open` はこの `fileId` を読んで同じ `/files/{fileId}` に戻ります。
+
+```json
+{
+  "excalidrawAgent": {
+    "schemaVersion": 1,
+    "fileId": "...",
+    "documentName": "file:...",
+    "serverBaseUrl": "http://127.0.0.1:5173",
+    "sidecarFile": "diagram.agent.json",
+    "updatedAt": "..."
+  }
+}
+```
+
+`Sidecar` は同じメタデータだけを `.agent.json` として保存します。ブラウザが File System Access API に対応している場合、保存・オープンしたローカルファイル handle と `fileId` の対応も IndexedDB に記録します。未対応ブラウザでは `.excalidraw` 本体に埋め込まれたメタデータを使って復帰します。
 
 ## Verification
 
