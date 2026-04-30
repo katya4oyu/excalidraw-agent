@@ -1,0 +1,39 @@
+[tools]
+node = "25.9.0"
+pnpm = "10.30.3"
+
+[tasks.install]
+description = "Install workspace dependencies"
+run = "pnpm install"
+
+[tasks.dev]
+description = "Start the server development process"
+run = "pnpm dev"
+
+[tasks.server]
+description = "Start apps/server"
+run = "pnpm dev:server"
+
+[tasks.web]
+description = "Start apps/web"
+run = "pnpm dev:web"
+
+[tasks.worker]
+description = "Start apps/worker"
+run = "pnpm dev:worker"
+
+[tasks."portless:server"]
+description = "Start apps/server through Portless at https://api.excalidraw-agent.localhost"
+run = "pnpm dlx portless api.excalidraw-agent pnpm dev:server"
+
+[tasks."portless:web"]
+description = "Start apps/web through Portless at https://excalidraw-agent.localhost"
+run = "VITE_SERVER_URL=$(pnpm dlx portless get api.excalidraw-agent) pnpm dlx portless excalidraw-agent pnpm dev:web"
+
+[tasks.typecheck]
+description = "Typecheck all workspaces"
+run = "pnpm typecheck"
+
+[tasks.test]
+description = "Run all tests"
+run = "pnpm test"

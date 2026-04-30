@@ -1,0 +1,20 @@
+{
+  "name": "@excalidraw-agent/worker",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node --import tsx src/index.ts",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@excalidraw-agent/shared": "workspace:*",
+    "@hocuspocus/provider": "^4.0.0",
+    "@openai/codex-sdk": "^0.125.0",
+    "yjs": "^13.6.27"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.1",
+    "tsx": "^4.21.0",
+    "typescript": "^5.8.3"
+  }
+}

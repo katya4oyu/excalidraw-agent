@@ -1,0 +1,17 @@
+{
+  "name": "excalidraw-agent",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.30.3",
+  "scripts": {
+    "dev": "pnpm --filter @excalidraw-agent/server dev",
+    "dev:server": "pnpm --filter @excalidraw-agent/server dev",
+    "dev:web": "pnpm --filter @excalidraw-agent/web dev",
+    "dev:worker": "pnpm --filter @excalidraw-agent/worker dev",
+    "typecheck": "pnpm --recursive typecheck",
+    "test": "pnpm --recursive test"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.3"
+  }
+}
