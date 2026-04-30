@@ -18,7 +18,11 @@ export class AppDatabase {
     this.migrate();
   }
 
-  createFile(id: FileId, documentName: CollabDocumentName): FileMetadata {
+  createFile(
+    id: FileId,
+    documentName: CollabDocumentName,
+    agentStatus: AgentStatus = "starting",
+  ): FileMetadata {
     const now = new Date().toISOString();
     this.db
       .prepare(
@@ -30,7 +34,7 @@ export class AppDatabase {
         $documentName: documentName,
         $createdAt: now,
         $updatedAt: now,
-        $agentStatus: "starting",
+        $agentStatus: agentStatus,
       });
 
     return {
@@ -38,7 +42,7 @@ export class AppDatabase {
       documentName,
       createdAt: now,
       updatedAt: now,
-      agentStatus: "starting",
+      agentStatus,
     };
   }
 

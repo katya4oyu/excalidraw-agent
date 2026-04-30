@@ -3,7 +3,17 @@ import { createNodeWebSocket } from "@hono/node-ws";
 import type { WebSocketLike } from "@hocuspocus/server";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
-import { createFileId, toDocumentName, type CreateFileResponse } from "@excalidraw-agent/shared";
+import * as Y from "yjs";
+import {
+  createExcalidrawYMap,
+  createFileId,
+  getExcalidrawAgentMetadata,
+  toDocumentName,
+  type CreateFileResponse,
+  type ExcalidrawDocumentData,
+  type ImportFileRequest,
+  type ImportFileResponse,
+} from "@excalidraw-agent/shared";
 import { AgentSupervisor } from "./agent";
 import { createCollabServer } from "./collab";
 import { AppDatabase } from "./db";
@@ -41,6 +51,42 @@ app.post("/api/files", (c) => {
   agents.start(id);
 
   return c.json<CreateFileResponse>({ id }, 201);
+});
+
+app.post("/api/files/import", async (c) => {
+  const body = await c.req.json().catch(() => null) as ImportFileRequest | null;
+  if (!body || !isRecord(body.document)) {
+    return c.json({ error: "document is required" }, 400);
+  }
+
+  const metadata = getExcalidrawAgentMetadata(body.document);
+  const requestedFileId = typeof body.fileId === "string" && body.fileId.trim()
+    ? body.fileId.trim()
+    : metadata?.fileId;
+
+  if (requestedFileId) {
+    const existing = db.getFile(requestedFileId);
+    if (existing) {
+      return c.json<ImportFileResponse>({
+        id: existing.id,
+        documentName: existing.documentName,
+        created: false,
+        imported: false,
+      });
+    }
+  }
+
+  const id = requestedFileId ?? createFileId();
+  const documentName = toDocumentName(id);
+  db.createFile(id, documentName, "verified");
+  storeExcalidrawDocument(documentName, body.document);
+
+  return c.json<ImportFileResponse>({
+    id,
+    documentName,
+    created: true,
+    imported: true,
+  }, 201);
 });
 
 app.get("/api/files/:id", (c) => {
@@ -106,4 +152,36 @@ async function toUint8Array(data: string | ArrayBuffer | SharedArrayBuffer | Uin
   }
 
   return new TextEncoder().encode(data);
+}
+
+function storeExcalidrawDocument(documentName: `file:${string}`, document: ExcalidrawDocumentData): void {
+  const ydoc = new Y.Doc();
+  const yElements = ydoc.getArray<Y.Map<unknown>>("elements");
+  const yAssets = ydoc.getMap("assets");
+  const yAppState = ydoc.getMap("appState");
+  const elements = Array.isArray(document.elements) ? document.elements : [];
+
+  yElements.push(
+    elements
+      .filter(isRecord)
+      .map((element, index) => createExcalidrawYMap(element, `${Date.now() + index}:${crypto.randomUUID()}`)),
+  );
+
+  if (isRecord(document.files)) {
+    for (const [id, file] of Object.entries(document.files)) {
+      yAssets.set(id, file);
+    }
+  }
+
+  if (isRecord(document.appState)) {
+    for (const [key, value] of Object.entries(document.appState)) {
+      yAppState.set(key, value);
+    }
+  }
+
+  db.storeDocument(documentName, Y.encodeStateAsUpdate(ydoc));
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
