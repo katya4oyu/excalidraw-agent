@@ -87,7 +87,23 @@ web    https://excalidraw-agent.localhost
 ws     wss://excalidraw-agent.localhost/collab
 ```
 
-Portless は初回起動時にローカルCAやhosts設定を行うことがあります。web は `VITE_SERVER_URL` を `https://api.excalidraw-agent.localhost` に向けて起動します。
+Portless は初回起動時にローカルCAやhosts設定を行うことがあります。`mise run portless:web` は `pnpm dlx portless get api.excalidraw-agent` の結果を `VITE_SERVER_URL` に渡し、web の Vite proxy から server へ接続します。HTTPS の Portless URL でも Vite proxy が自己署名証明書で落ちないよう、開発時 proxy は `secure: false` にしています。
+
+LAN へ公開する場合は、server と web の Portless task を起動したうえで、別ターミナルで LAN proxy を起動します。
+
+```bash
+PORTLESS_LAN_IP=192.168.201.76 mise run portless:lan
+```
+
+LAN proxy を `--no-tls` で起動するため、同じ Wi-Fi の端末からは次のURLを使います。
+
+```text
+server http://api.excalidraw-agent.local:1355
+web    http://excalidraw-agent.local:1355
+ws     ws://excalidraw-agent.local:1355/collab
+```
+
+Portless のルーティング先ポートは起動ごとに変わるため、web は `PORT` 環境変数を読んで Vite の待受ポートを合わせます。LAN proxy を止めるときは `mise run portless:stop` を使います。
 
 `POST /api/files` は新規ファイルIDを作り、worker を起動します。worker は Codex SDK を実行するため、Codex CLI/API の認証状態が必要です。
 

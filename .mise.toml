@@ -30,6 +30,14 @@ run = "pnpm dlx portless api.excalidraw-agent pnpm dev:server"
 description = "Start apps/web through Portless at https://excalidraw-agent.localhost"
 run = "VITE_SERVER_URL=$(pnpm dlx portless get api.excalidraw-agent) pnpm dlx portless excalidraw-agent pnpm dev:web"
 
+[tasks."portless:lan"]
+description = "Start the Portless LAN proxy on port 1355"
+run = "pnpm dlx portless proxy start --port 1355 --no-tls --lan --ip ${PORTLESS_LAN_IP:-192.168.201.76}"
+
+[tasks."portless:stop"]
+description = "Stop the Portless proxy on port 1355"
+run = "pnpm dlx portless proxy stop -p 1355"
+
 [tasks.typecheck]
 description = "Typecheck all workspaces"
 run = "pnpm typecheck"
