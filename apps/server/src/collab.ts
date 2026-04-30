@@ -1,8 +1,6 @@
 import { Hocuspocus } from "@hocuspocus/server";
 import * as Y from "yjs";
 import { randomUUID } from "node:crypto";
-import type { AppDatabase } from "./db";
-import type { AgentSupervisor } from "./agent";
 import {
   fileIdFromDocumentName,
   getAgentInstructionPrompt,
@@ -10,7 +8,16 @@ import {
   type FileId,
 } from "@excalidraw-agent/shared";
 
-export const createCollabServer = (db: AppDatabase, agents: AgentSupervisor): Hocuspocus => {
+interface CollabDatabase {
+  loadDocument(documentName: CollabDocumentName): Uint8Array | null;
+  storeDocument(documentName: CollabDocumentName, state: Uint8Array): void;
+}
+
+interface CollabAgentSupervisor extends AgentInstructionStarter {
+  markFromDocumentName(documentName: string, status: "verified"): void;
+}
+
+export const createCollabServer = (db: CollabDatabase, agents: CollabAgentSupervisor): Hocuspocus => {
   return new Hocuspocus({
     name: "excalidraw-agent-collab",
     debounce: 500,
@@ -22,6 +29,11 @@ export const createCollabServer = (db: AppDatabase, agents: AgentSupervisor): Ho
 
       if (persisted) {
         Y.applyUpdate(ydoc, persisted);
+      }
+
+      const fileId = fileIdFromDocumentName(documentName);
+      if (fileId) {
+        startAgentFromInstructionRequests(ydoc, fileId, agents);
       }
 
       return ydoc;
