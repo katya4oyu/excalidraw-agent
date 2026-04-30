@@ -73,19 +73,28 @@ export function useExcalidrawCollab({ fileId, excalidrawElement }: UseExcalidraw
     };
 
     provider.on("status", handleStatus);
-    provider.on("synced", () => setStatus("synced"));
+    const handleSynced = () => {
+      const importedAppState = ydoc.getMap("appState").toJSON();
+      if (Object.keys(importedAppState).length > 0) {
+        api.updateScene({ appState: importedAppState as any });
+      }
+      setStatus("synced");
+    };
+    provider.on("synced", handleSynced);
 
     setBinding(nextBinding);
 
     return () => {
       setBinding(null);
       provider.off("status", handleStatus);
+      provider.off("synced", handleSynced);
       nextBinding.destroy();
       provider.destroy();
     };
   }, [api, collabUrl, excalidrawElement, fileId]);
 
   return {
+    api,
     binding,
     setApi,
     status,
