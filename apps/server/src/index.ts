@@ -89,6 +89,27 @@ app.post("/api/files/import", async (c) => {
   }, 201);
 });
 
+app.post("/api/files/:id/agent-runs", async (c) => {
+  const fileId = c.req.param("id");
+  const file = db.getFile(fileId);
+  if (!file) {
+    return c.json({ error: "file not found" }, 404);
+  }
+
+  const body = await c.req.json().catch(() => null) as { prompt?: unknown } | null;
+  const prompt = typeof body?.prompt === "string" ? body.prompt.trim() : "";
+  if (!prompt) {
+    return c.json({ error: "prompt is required" }, 400);
+  }
+
+  const started = agents.start(file.id, { prompt });
+  return c.json({
+    fileId: file.id,
+    started,
+    agentStatus: "running",
+  }, started ? 201 : 202);
+});
+
 app.get("/api/files/:id", (c) => {
   const file = db.getFile(c.req.param("id"));
 

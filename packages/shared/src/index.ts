@@ -74,6 +74,8 @@ export interface ExcalidrawAgentInstructionElementMetadata {
   kind: "instruction";
 }
 
+export const agentInstructionPlaceholderText = "Agentへの置き手紙を書いてください";
+
 export const excalidrawAgentInstructionElementMetadata = {
   schemaVersion: 1,
   kind: "instruction",
@@ -328,6 +330,19 @@ export const isAgentInstructionElement = (element: unknown): boolean => {
     metadata.schemaVersion === 1 &&
     metadata.kind === "instruction"
   );
+};
+
+export const getAgentInstructionPrompt = (element: unknown): string | null => {
+  if (!isAgentInstructionElement(element) || !isRecord(element) || element.type !== "text") {
+    return null;
+  }
+
+  const text = typeof element.text === "string" ? element.text.trim() : "";
+  if (!text || text === agentInstructionPlaceholderText) {
+    return null;
+  }
+
+  return text;
 };
 
 export const createAgentDemoElement = (

@@ -10,23 +10,28 @@ export class AgentSupervisor {
     private readonly serverUrl: string,
   ) {}
 
-  start(fileId: FileId): void {
+  start(fileId: FileId, options: { prompt?: string } = {}): boolean {
     if (this.processes.has(fileId)) {
-      return;
+      return false;
+    }
+
+    const args = [
+      "--filter",
+      "@excalidraw-agent/worker",
+      "dev",
+      "--",
+      "--file-id",
+      fileId,
+      "--server-url",
+      this.serverUrl,
+    ];
+    if (options.prompt?.trim()) {
+      args.push("--prompt", options.prompt.trim());
     }
 
     const child = spawn(
       "pnpm",
-      [
-        "--filter",
-        "@excalidraw-agent/worker",
-        "dev",
-        "--",
-        "--file-id",
-        fileId,
-        "--server-url",
-        this.serverUrl,
-      ],
+      args,
       {
         env: {
           ...process.env,
@@ -38,6 +43,11 @@ export class AgentSupervisor {
     this.processes.set(fileId, child);
     this.db.updateAgentStatus(fileId, "running");
     this.watch(fileId, child);
+    return true;
+  }
+
+  isRunning(fileId: FileId): boolean {
+    return this.processes.has(fileId);
   }
 
   markFromDocumentName(documentName: string, status: AgentStatus): void {

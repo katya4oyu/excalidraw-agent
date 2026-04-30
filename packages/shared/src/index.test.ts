@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import {
+  agentInstructionPlaceholderText,
   createAgentInstructionElement,
   createAgentInstructionNoteElements,
   createExcalidrawAgentMetadata,
   fileIdFromDocumentName,
+  getAgentInstructionPrompt,
   getExcalidrawAgentMetadata,
   isAgentInstructionElement,
   toDocumentName,
@@ -99,5 +101,22 @@ describe("agent instruction elements", () => {
     assert.deepEqual(note.groupIds, text.groupIds);
     assert.equal(isAgentInstructionElement(note), true);
     assert.equal(isAgentInstructionElement(text), true);
+  });
+
+  test("extracts prompts only from edited instruction text", () => {
+    const [, placeholderText] = createAgentInstructionNoteElements({
+      x: 10,
+      y: 20,
+      text: agentInstructionPlaceholderText,
+    });
+    const [, editedText] = createAgentInstructionNoteElements({
+      x: 10,
+      y: 20,
+      text: "この付箋の内容で図を整理して",
+    });
+
+    assert.equal(getAgentInstructionPrompt(placeholderText), null);
+    assert.equal(getAgentInstructionPrompt(editedText), "この付箋の内容で図を整理して");
+    assert.equal(getAgentInstructionPrompt({ type: "text", text: "ordinary" }), null);
   });
 });

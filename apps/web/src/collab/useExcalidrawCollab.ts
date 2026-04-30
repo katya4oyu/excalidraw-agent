@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { HocuspocusProvider } from "@hocuspocus/provider";
 import {
+  agentInstructionPlaceholderText,
   createAgentInstructionNoteElements,
   insertExcalidrawElements,
   toDocumentName,
@@ -157,7 +158,7 @@ export function useExcalidrawCollab({ fileId, excalidrawElement }: UseExcalidraw
       createAgentInstructionNoteElements({
         x,
         y,
-        text: "Agentへの置き手紙を書いてください",
+        text: agentInstructionPlaceholderText,
       }),
     );
   }, []);
@@ -176,7 +177,7 @@ export function useExcalidrawCollab({ fileId, excalidrawElement }: UseExcalidraw
       ydocRef.current,
       createAgentInstructionNoteElements({
         ...input,
-        text: "Agentへの置き手紙を書いてください",
+        text: agentInstructionPlaceholderText,
       }),
     );
   }, []);
