@@ -61,6 +61,22 @@ export interface ExcalidrawYElement {
   pos: string;
 }
 
+export interface AgentInstructionElementOptions {
+  x: number;
+  y: number;
+  text: string;
+}
+
+export interface ExcalidrawAgentInstructionElementMetadata {
+  schemaVersion: 1;
+  kind: "instruction";
+}
+
+export const excalidrawAgentInstructionElementMetadata = {
+  schemaVersion: 1,
+  kind: "instruction",
+} as const satisfies ExcalidrawAgentInstructionElementMetadata;
+
 export const toDocumentName = (fileId: FileId): CollabDocumentName => {
   if (!fileId.trim()) {
     throw new Error("fileId is required");
@@ -149,6 +165,165 @@ export const insertExcalidrawElement = (
   element: Record<string, unknown>,
 ): void => {
   ydoc.getArray<Y.Map<unknown>>("elements").push([createExcalidrawYMap(element)]);
+};
+
+export const insertExcalidrawElements = (
+  ydoc: Y.Doc,
+  elements: readonly Record<string, unknown>[],
+): void => {
+  const now = Date.now();
+  ydoc
+    .getArray<Y.Map<unknown>>("elements")
+    .push(elements.map((element, index) => createExcalidrawYMap(element, `${now + index}:${crypto.randomUUID()}`)));
+};
+
+export const createAgentInstructionElement = ({
+  x,
+  y,
+  text,
+}: AgentInstructionElementOptions): Record<string, unknown> => {
+  const now = Date.now();
+
+  return {
+    id: `agent-instruction-${crypto.randomUUID()}`,
+    type: "text",
+    x,
+    y,
+    width: 420,
+    height: 120,
+    angle: 0,
+    strokeColor: "#123c69",
+    backgroundColor: "#e8f3ff",
+    fillStyle: "solid",
+    strokeWidth: 1,
+    strokeStyle: "solid",
+    roughness: 1,
+    opacity: 100,
+    groupIds: [],
+    frameId: null,
+    roundness: null,
+    seed: Math.floor(Math.random() * 1_000_000),
+    version: 1,
+    versionNonce: Math.floor(Math.random() * 1_000_000),
+    isDeleted: false,
+    boundElements: null,
+    updated: now,
+    link: null,
+    locked: false,
+    text,
+    originalText: text,
+    fontSize: 20,
+    fontFamily: 1,
+    textAlign: "left",
+    verticalAlign: "top",
+    containerId: null,
+    lineHeight: 1.25,
+    customData: {
+      excalidrawAgent: excalidrawAgentInstructionElementMetadata,
+    },
+  };
+};
+
+export const createAgentInstructionNoteElements = ({
+  x,
+  y,
+  text,
+}: AgentInstructionElementOptions): Record<string, unknown>[] => {
+  const now = Date.now();
+  const groupId = `agent-instruction-group-${crypto.randomUUID()}`;
+  const noteId = `agent-instruction-note-${crypto.randomUUID()}`;
+  const textId = `agent-instruction-${crypto.randomUUID()}`;
+
+  return [
+    {
+      id: noteId,
+      type: "rectangle",
+      x,
+      y,
+      width: 420,
+      height: 120,
+      angle: 0,
+      strokeColor: "#8a6d1d",
+      backgroundColor: "#fff3bf",
+      fillStyle: "solid",
+      strokeWidth: 1,
+      strokeStyle: "solid",
+      roughness: 1,
+      opacity: 100,
+      groupIds: [groupId],
+      frameId: null,
+      roundness: {
+        type: 3,
+      },
+      seed: Math.floor(Math.random() * 1_000_000),
+      version: 1,
+      versionNonce: Math.floor(Math.random() * 1_000_000),
+      isDeleted: false,
+      boundElements: null,
+      updated: now,
+      link: null,
+      locked: false,
+      customData: {
+        excalidrawAgent: excalidrawAgentInstructionElementMetadata,
+      },
+    },
+    {
+      id: textId,
+      type: "text",
+      x: x + 16,
+      y: y + 16,
+      width: 388,
+      height: 88,
+      angle: 0,
+      strokeColor: "#4f3f16",
+      backgroundColor: "transparent",
+      fillStyle: "solid",
+      strokeWidth: 1,
+      strokeStyle: "solid",
+      roughness: 1,
+      opacity: 100,
+      groupIds: [groupId],
+      frameId: null,
+      roundness: null,
+      seed: Math.floor(Math.random() * 1_000_000),
+      version: 1,
+      versionNonce: Math.floor(Math.random() * 1_000_000),
+      isDeleted: false,
+      boundElements: null,
+      updated: now,
+      link: null,
+      locked: false,
+      text,
+      originalText: text,
+      fontSize: 20,
+      fontFamily: 1,
+      textAlign: "left",
+      verticalAlign: "top",
+      containerId: null,
+      lineHeight: 1.25,
+      customData: {
+        excalidrawAgent: excalidrawAgentInstructionElementMetadata,
+      },
+    },
+  ];
+};
+
+export const isAgentInstructionElement = (element: unknown): boolean => {
+  if (!isRecord(element)) {
+    return false;
+  }
+
+  const customData = element.customData;
+  if (!isRecord(customData)) {
+    return false;
+  }
+
+  const metadata = customData.excalidrawAgent;
+  return (
+    isRecord(metadata) &&
+    metadata.schemaVersion === 1 &&
+    metadata.kind === "instruction"
+  );
 };
 
 export const createAgentDemoElement = (

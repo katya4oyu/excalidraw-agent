@@ -8,7 +8,7 @@ import type { AgentFooterState } from "@excalidraw-agent/y-excalidraw-browser";
 export function FilePage() {
   const { id } = useParams();
   const shellRef = useRef<HTMLDivElement | null>(null);
-  const { agentFooterState, binding, setApi, status } = useExcalidrawCollab({
+  const { addAgentInstruction, agentFooterState, binding, setApi, status } = useExcalidrawCollab({
     fileId: id ?? "",
     excalidrawElement: shellRef.current,
   });
@@ -27,7 +27,11 @@ export function FilePage() {
         >
           <WelcomeScreen />
           <Footer>
-            <AgentFooterStatus agent={agentFooterState} collabStatus={status} />
+            <AgentFooterStatus
+              agent={agentFooterState}
+              collabStatus={status}
+              onAddInstruction={addAgentInstruction}
+            />
           </Footer>
         </Excalidraw>
       </div>
@@ -38,9 +42,11 @@ export function FilePage() {
 function AgentFooterStatus({
   agent,
   collabStatus,
+  onAddInstruction,
 }: {
   agent: AgentFooterState;
   collabStatus: string;
+  onAddInstruction: () => void;
 }) {
   const label = toAgentFooterLabel(agent);
 
@@ -52,6 +58,9 @@ function AgentFooterStatus({
         <span className="agent-footer-status__meta">{agent.ghostElementCount} ghost</span>
       ) : null}
       <span className="agent-footer-status__meta">{collabStatus}</span>
+      <button className="agent-footer-status__button" type="button" onClick={onAddInstruction}>
+        Note
+      </button>
     </div>
   );
 }

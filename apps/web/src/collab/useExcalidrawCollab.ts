@@ -1,6 +1,10 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { HocuspocusProvider } from "@hocuspocus/provider";
-import { toDocumentName } from "@excalidraw-agent/shared";
+import {
+  createAgentInstructionNoteElements,
+  insertExcalidrawElements,
+  toDocumentName,
+} from "@excalidraw-agent/shared";
 import {
   createAgentFooterStateObserver,
   ExcalidrawBinding,
@@ -18,6 +22,7 @@ export function useExcalidrawCollab({ fileId, excalidrawElement }: UseExcalidraw
   const [api, setApi] = useState<ExcalidrawImperativeAPI | null>(null);
   const [status, setStatus] = useState("connecting");
   const [binding, setBinding] = useState<ExcalidrawBinding | null>(null);
+  const ydocRef = useRef<Y.Doc | null>(null);
   const [agentFooterState, setAgentFooterState] = useState<AgentFooterState>({
     runStatus: "idle",
     activeRunCount: 0,
@@ -58,6 +63,7 @@ export function useExcalidrawCollab({ fileId, excalidrawElement }: UseExcalidraw
     });
 
     const ydoc = provider.document;
+    ydocRef.current = ydoc;
     const yElements = ydoc.getArray<Y.Map<any>>("elements");
     const yAssets = ydoc.getMap("assets");
     const yAgentRuns = ydoc.getMap("agentRuns");
@@ -106,6 +112,7 @@ export function useExcalidrawCollab({ fileId, excalidrawElement }: UseExcalidraw
 
     return () => {
       setBinding(null);
+      ydocRef.current = null;
       setAgentFooterState({
         runStatus: "idle",
         activeRunCount: 0,
@@ -120,11 +127,50 @@ export function useExcalidrawCollab({ fileId, excalidrawElement }: UseExcalidraw
     };
   }, [api, collabUrl, excalidrawElement, fileId]);
 
+  const addAgentInstruction = useCallback(() => {
+    if (!api || !ydocRef.current) {
+      return;
+    }
+
+    const appState = api.getAppState();
+    const zoom = appState.zoom.value;
+    const elementWidth = 420;
+    const elementHeight = 120;
+    const viewportLeft = -appState.scrollX;
+    const viewportTop = -appState.scrollY;
+    const viewportWidth = appState.width / zoom;
+    const viewportHeight = appState.height / zoom;
+    const x = clamp(
+      viewportLeft + viewportWidth / 2 + 40,
+      viewportLeft + 24,
+      viewportLeft + viewportWidth - elementWidth - 24,
+    );
+    const y = clamp(
+      viewportTop + viewportHeight / 2 - elementHeight / 2,
+      viewportTop + 24,
+      viewportTop + viewportHeight - elementHeight - 96,
+    );
+
+    insertExcalidrawElements(
+      ydocRef.current,
+      createAgentInstructionNoteElements({
+        x,
+        y,
+        text: "Agentへの置き手紙を書いてください",
+      }),
+    );
+  }, [api]);
+
   return {
+    addAgentInstruction,
     api,
     agentFooterState,
     binding,
     setApi,
     status,
   };
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(Math.max(value, min), Math.max(min, max));
 }
