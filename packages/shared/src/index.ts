@@ -65,6 +65,8 @@ export interface AgentInstructionElementOptions {
   x: number;
   y: number;
   text: string;
+  width?: number;
+  height?: number;
 }
 
 export interface ExcalidrawAgentInstructionElementMetadata {
@@ -225,9 +227,11 @@ export const createAgentInstructionElement = ({
 };
 
 export const createAgentInstructionNoteElements = ({
+  height = 120,
   x,
   y,
   text,
+  width = 420,
 }: AgentInstructionElementOptions): Record<string, unknown>[] => {
   const now = Date.now();
   const groupId = `agent-instruction-group-${crypto.randomUUID()}`;
@@ -240,8 +244,8 @@ export const createAgentInstructionNoteElements = ({
       type: "rectangle",
       x,
       y,
-      width: 420,
-      height: 120,
+      width,
+      height,
       angle: 0,
       strokeColor: "#8a6d1d",
       backgroundColor: "#fff3bf",
@@ -272,8 +276,8 @@ export const createAgentInstructionNoteElements = ({
       type: "text",
       x: x + 16,
       y: y + 16,
-      width: 388,
-      height: 88,
+      width: Math.max(0, width - 32),
+      height: Math.max(0, height - 32),
       angle: 0,
       strokeColor: "#4f3f16",
       backgroundColor: "transparent",

@@ -81,14 +81,20 @@ describe("agent instruction elements", () => {
 
   test("creates grouped sticky-note elements for agent instructions", () => {
     const [note, text] = createAgentInstructionNoteElements({
+      height: 160,
       x: 10,
       y: 20,
       text: "Check this area",
+      width: 300,
     });
 
     assert.equal(note.type, "rectangle");
+    assert.equal(note.width, 300);
+    assert.equal(note.height, 160);
     assert.equal(note.backgroundColor, "#fff3bf");
     assert.equal(text.type, "text");
+    assert.equal(text.width, 268);
+    assert.equal(text.height, 128);
     assert.equal(text.text, "Check this area");
     assert.deepEqual(note.groupIds, text.groupIds);
     assert.equal(isAgentInstructionElement(note), true);

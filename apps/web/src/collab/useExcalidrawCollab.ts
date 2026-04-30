@@ -11,7 +11,11 @@ import {
   type AgentFooterState,
 } from "@excalidraw-agent/y-excalidraw-browser";
 import * as Y from "yjs";
-import type { ExcalidrawImperativeAPI } from "@excalidraw/excalidraw/types";
+import type {
+  AppState,
+  ExcalidrawImperativeAPI,
+  PointerDownState,
+} from "@excalidraw/excalidraw/types";
 
 interface UseExcalidrawCollabOptions {
   fileId: string;
@@ -22,6 +26,7 @@ export function useExcalidrawCollab({ fileId, excalidrawElement }: UseExcalidraw
   const [api, setApi] = useState<ExcalidrawImperativeAPI | null>(null);
   const [status, setStatus] = useState("connecting");
   const [binding, setBinding] = useState<ExcalidrawBinding | null>(null);
+  const [isAgentInstructionMode, setIsAgentInstructionMode] = useState(false);
   const ydocRef = useRef<Y.Doc | null>(null);
   const [agentFooterState, setAgentFooterState] = useState<AgentFooterState>({
     runStatus: "idle",
@@ -127,8 +132,57 @@ export function useExcalidrawCollab({ fileId, excalidrawElement }: UseExcalidraw
     };
   }, [api, collabUrl, excalidrawElement, fileId]);
 
+  useEffect(() => {
+    if (!api) {
+      return;
+    }
+
+    if (isAgentInstructionMode) {
+      api.setCursor("crosshair");
+      return () => {
+        api.resetCursor();
+      };
+    }
+
+    api.resetCursor();
+  }, [api, isAgentInstructionMode]);
+
+  const insertAgentInstructionAt = useCallback((x: number, y: number) => {
+    if (!ydocRef.current) {
+      return;
+    }
+
+    insertExcalidrawElements(
+      ydocRef.current,
+      createAgentInstructionNoteElements({
+        x,
+        y,
+        text: "Agentへの置き手紙を書いてください",
+      }),
+    );
+  }, []);
+
+  const insertAgentInstructionBox = useCallback((input: {
+    height?: number;
+    width?: number;
+    x: number;
+    y: number;
+  }) => {
+    if (!ydocRef.current) {
+      return;
+    }
+
+    insertExcalidrawElements(
+      ydocRef.current,
+      createAgentInstructionNoteElements({
+        ...input,
+        text: "Agentへの置き手紙を書いてください",
+      }),
+    );
+  }, []);
+
   const addAgentInstruction = useCallback(() => {
-    if (!api || !ydocRef.current) {
+    if (!api) {
       return;
     }
 
@@ -151,23 +205,49 @@ export function useExcalidrawCollab({ fileId, excalidrawElement }: UseExcalidraw
       viewportTop + viewportHeight - elementHeight - 96,
     );
 
-    insertExcalidrawElements(
-      ydocRef.current,
-      createAgentInstructionNoteElements({
-        x,
-        y,
-        text: "Agentへの置き手紙を書いてください",
-      }),
-    );
-  }, [api]);
+    insertAgentInstructionAt(x, y);
+  }, [api, insertAgentInstructionAt]);
+
+  const toggleAgentInstructionMode = useCallback(() => {
+    setIsAgentInstructionMode((current) => !current);
+  }, []);
+
+  const onPointerUp = useCallback((
+    _activeTool: AppState["activeTool"],
+    pointerDownState: PointerDownState,
+  ) => {
+    if (!isAgentInstructionMode) {
+      return;
+    }
+
+    const deltaX = pointerDownState.lastCoords.x - pointerDownState.origin.x;
+    const deltaY = pointerDownState.lastCoords.y - pointerDownState.origin.y;
+    const hasDragged = Math.abs(deltaX) >= 8 || Math.abs(deltaY) >= 8;
+
+    if (hasDragged) {
+      insertAgentInstructionBox({
+        x: Math.min(pointerDownState.origin.x, pointerDownState.lastCoords.x),
+        y: Math.min(pointerDownState.origin.y, pointerDownState.lastCoords.y),
+        width: Math.max(180, Math.abs(deltaX)),
+        height: Math.max(96, Math.abs(deltaY)),
+      });
+    } else {
+      insertAgentInstructionAt(pointerDownState.origin.x, pointerDownState.origin.y);
+    }
+
+    setIsAgentInstructionMode(false);
+  }, [insertAgentInstructionAt, insertAgentInstructionBox, isAgentInstructionMode]);
 
   return {
     addAgentInstruction,
     api,
     agentFooterState,
     binding,
+    isAgentInstructionMode,
+    onPointerUp,
     setApi,
     status,
+    toggleAgentInstructionMode,
   };
 }
 

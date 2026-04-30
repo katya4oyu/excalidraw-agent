@@ -8,7 +8,15 @@ import type { AgentFooterState } from "@excalidraw-agent/y-excalidraw-browser";
 export function FilePage() {
   const { id } = useParams();
   const shellRef = useRef<HTMLDivElement | null>(null);
-  const { addAgentInstruction, agentFooterState, binding, setApi, status } = useExcalidrawCollab({
+  const {
+    agentFooterState,
+    binding,
+    isAgentInstructionMode,
+    onPointerUp,
+    setApi,
+    status,
+    toggleAgentInstructionMode,
+  } = useExcalidrawCollab({
     fileId: id ?? "",
     excalidrawElement: shellRef.current,
   });
@@ -23,6 +31,7 @@ export function FilePage() {
         <Excalidraw
           excalidrawAPI={setApi}
           isCollaborating={Boolean(binding)}
+          onPointerUp={onPointerUp}
           onPointerUpdate={binding?.onPointerUpdate}
         >
           <WelcomeScreen />
@@ -30,7 +39,8 @@ export function FilePage() {
             <AgentFooterStatus
               agent={agentFooterState}
               collabStatus={status}
-              onAddInstruction={addAgentInstruction}
+              isInstructionMode={isAgentInstructionMode}
+              onToggleInstructionMode={toggleAgentInstructionMode}
             />
           </Footer>
         </Excalidraw>
@@ -42,11 +52,13 @@ export function FilePage() {
 function AgentFooterStatus({
   agent,
   collabStatus,
-  onAddInstruction,
+  isInstructionMode,
+  onToggleInstructionMode,
 }: {
   agent: AgentFooterState;
   collabStatus: string;
-  onAddInstruction: () => void;
+  isInstructionMode: boolean;
+  onToggleInstructionMode: () => void;
 }) {
   const label = toAgentFooterLabel(agent);
 
@@ -58,8 +70,15 @@ function AgentFooterStatus({
         <span className="agent-footer-status__meta">{agent.ghostElementCount} ghost</span>
       ) : null}
       <span className="agent-footer-status__meta">{collabStatus}</span>
-      <button className="agent-footer-status__button" type="button" onClick={onAddInstruction}>
-        Note
+      <button
+        aria-label={isInstructionMode ? "Cancel agent note placement" : "Place agent note"}
+        aria-pressed={isInstructionMode}
+        className="agent-footer-status__button"
+        title={isInstructionMode ? "Cancel agent note placement" : "Place agent note"}
+        type="button"
+        onClick={onToggleInstructionMode}
+      >
+        <span className="agent-footer-status__note-icon" aria-hidden="true" />
       </button>
     </div>
   );
