@@ -12,6 +12,7 @@ export function FilePage() {
     agentFooterState,
     binding,
     isAgentInstructionMode,
+    onChange,
     onPointerUp,
     setApi,
     status,
@@ -31,6 +32,7 @@ export function FilePage() {
         <Excalidraw
           excalidrawAPI={setApi}
           isCollaborating={Boolean(binding)}
+          onChange={onChange}
           onPointerUp={onPointerUp}
           onPointerUpdate={binding?.onPointerUpdate}
         >

@@ -3,6 +3,7 @@ import { HocuspocusProvider } from "@hocuspocus/provider";
 import {
   agentInstructionPlaceholderText,
   createAgentInstructionNoteElements,
+  getAgentInstructionPrompt,
   insertExcalidrawElements,
   toDocumentName,
 } from "@excalidraw-agent/shared";
@@ -29,6 +30,7 @@ export function useExcalidrawCollab({ fileId, excalidrawElement }: UseExcalidraw
   const [binding, setBinding] = useState<ExcalidrawBinding | null>(null);
   const [isAgentInstructionMode, setIsAgentInstructionMode] = useState(false);
   const ydocRef = useRef<Y.Doc | null>(null);
+  const requestedInstructionPromptsRef = useRef(new Map<string, string>());
   const [agentFooterState, setAgentFooterState] = useState<AgentFooterState>({
     runStatus: "idle",
     activeRunCount: 0,
@@ -119,6 +121,7 @@ export function useExcalidrawCollab({ fileId, excalidrawElement }: UseExcalidraw
     return () => {
       setBinding(null);
       ydocRef.current = null;
+      requestedInstructionPromptsRef.current.clear();
       setAgentFooterState({
         runStatus: "idle",
         activeRunCount: 0,
@@ -213,6 +216,39 @@ export function useExcalidrawCollab({ fileId, excalidrawElement }: UseExcalidraw
     setIsAgentInstructionMode((current) => !current);
   }, []);
 
+  const onChange = useCallback((elements: readonly Record<string, unknown>[], appState: AppState) => {
+    if (isEditingText(appState) || !ydocRef.current) {
+      return;
+    }
+
+    const requests = ydocRef.current.getMap<Record<string, unknown>>("agentInstructionRequests");
+    for (const element of elements) {
+      const prompt = getAgentInstructionPrompt(element);
+      const elementId = getElementId(element);
+      if (!prompt || !elementId) {
+        continue;
+      }
+
+      const lastPrompt = requestedInstructionPromptsRef.current.get(elementId);
+      const existing = requests.get(elementId);
+      if (lastPrompt === prompt || (isRecord(existing) && existing.prompt === prompt)) {
+        requestedInstructionPromptsRef.current.set(elementId, prompt);
+        continue;
+      }
+
+      const now = Date.now();
+      requests.set(elementId, {
+        status: "queued",
+        source: "instruction-note",
+        prompt,
+        elementId,
+        createdAt: now,
+        updatedAt: now,
+      });
+      requestedInstructionPromptsRef.current.set(elementId, prompt);
+    }
+  }, []);
+
   const onPointerUp = useCallback((
     _activeTool: AppState["activeTool"],
     pointerDownState: PointerDownState,
@@ -245,6 +281,7 @@ export function useExcalidrawCollab({ fileId, excalidrawElement }: UseExcalidraw
     agentFooterState,
     binding,
     isAgentInstructionMode,
+    onChange,
     onPointerUp,
     setApi,
     status,
@@ -254,4 +291,16 @@ export function useExcalidrawCollab({ fileId, excalidrawElement }: UseExcalidraw
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), Math.max(min, max));
+}
+
+function isEditingText(appState: AppState): boolean {
+  return Boolean((appState as AppState & { editingTextElement?: unknown }).editingTextElement);
+}
+
+function getElementId(element: Record<string, unknown>): string {
+  return typeof element.id === "string" ? element.id : "";
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
