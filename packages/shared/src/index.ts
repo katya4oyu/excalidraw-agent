@@ -17,12 +17,43 @@ export interface CreateFileResponse {
   id: FileId;
 }
 
+export interface ImportFileRequest {
+  fileId?: FileId;
+  document: ExcalidrawDocumentData;
+}
+
+export interface ImportFileResponse {
+  id: FileId;
+  documentName: CollabDocumentName;
+  created: boolean;
+  imported: boolean;
+}
+
 export interface AgentWorkerOptions {
   fileId: FileId;
   serverUrl: string;
   workspaceRoot: string;
   workspaceTemplate: string;
   prompt?: string;
+}
+
+export interface ExcalidrawAgentMetadata {
+  schemaVersion: 1;
+  fileId: FileId;
+  documentName: CollabDocumentName;
+  serverBaseUrl?: string;
+  sidecarFile?: string;
+  updatedAt: string;
+}
+
+export interface ExcalidrawDocumentData {
+  type?: string;
+  version?: number;
+  source?: string;
+  elements?: readonly Record<string, unknown>[] | null;
+  appState?: Record<string, unknown> | null;
+  files?: Record<string, unknown>;
+  excalidrawAgent?: ExcalidrawAgentMetadata | null;
 }
 
 export interface ExcalidrawYElement {
@@ -44,6 +75,63 @@ export const fileIdFromDocumentName = (name: string): FileId | null => {
 
 export const createFileId = (): FileId => {
   return crypto.randomUUID();
+};
+
+export const createExcalidrawAgentMetadata = (
+  fileId: FileId,
+  options: {
+    serverBaseUrl?: string;
+    sidecarFile?: string;
+    updatedAt?: string;
+  } = {},
+): ExcalidrawAgentMetadata => {
+  return {
+    schemaVersion: 1,
+    fileId,
+    documentName: toDocumentName(fileId),
+    serverBaseUrl: options.serverBaseUrl,
+    sidecarFile: options.sidecarFile,
+    updatedAt: options.updatedAt ?? new Date().toISOString(),
+  };
+};
+
+export const getExcalidrawAgentMetadata = (
+  data: unknown,
+): ExcalidrawAgentMetadata | null => {
+  if (!isRecord(data)) {
+    return null;
+  }
+
+  const candidate = isRecord(data.excalidrawAgent) ? data.excalidrawAgent : data;
+  if (
+    candidate.schemaVersion !== 1 ||
+    typeof candidate.fileId !== "string" ||
+    !candidate.fileId.trim() ||
+    typeof candidate.documentName !== "string" ||
+    candidate.documentName !== toDocumentName(candidate.fileId) ||
+    typeof candidate.updatedAt !== "string"
+  ) {
+    return null;
+  }
+
+  return {
+    schemaVersion: 1,
+    fileId: candidate.fileId,
+    documentName: candidate.documentName as CollabDocumentName,
+    serverBaseUrl: typeof candidate.serverBaseUrl === "string" ? candidate.serverBaseUrl : undefined,
+    sidecarFile: typeof candidate.sidecarFile === "string" ? candidate.sidecarFile : undefined,
+    updatedAt: candidate.updatedAt,
+  };
+};
+
+export const withExcalidrawAgentMetadata = <T extends Record<string, unknown>>(
+  document: T,
+  metadata: ExcalidrawAgentMetadata,
+): T & { excalidrawAgent: ExcalidrawAgentMetadata } => {
+  return {
+    ...document,
+    excalidrawAgent: metadata,
+  };
 };
 
 export const createExcalidrawYMap = (
@@ -103,4 +191,8 @@ export const createAgentDemoElement = (
     originalText: "AI Agent joined this canvas.\nVerified changes will arrive through Yjs.",
     lineHeight: 1.25,
   };
+};
+
+const isRecord = (value: unknown): value is Record<string, unknown> => {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 };
