@@ -24,59 +24,9 @@ body {
 }
 
 .canvas-page {
-  position: relative;
   width: 100vw;
   height: 100vh;
   overflow: hidden;
-}
-
-.file-toolbar {
-  position: absolute;
-  top: 10px;
-  left: 50%;
-  z-index: 10;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  max-width: calc(100vw - 24px);
-  min-height: 36px;
-  padding: 4px 6px;
-  background: rgba(255, 255, 255, 0.92);
-  border: 1px solid rgba(35, 38, 47, 0.16);
-  border-radius: 8px;
-  box-shadow: 0 4px 16px rgba(35, 38, 47, 0.12);
-  transform: translateX(-50%);
-}
-
-.file-toolbar button {
-  min-width: 58px;
-  height: 28px;
-  padding: 0 10px;
-  border: 1px solid rgba(35, 38, 47, 0.18);
-  border-radius: 6px;
-  background: #ffffff;
-  color: #1f2937;
-  font: inherit;
-  font-size: 13px;
-  cursor: pointer;
-}
-
-.file-toolbar button:disabled {
-  color: #8a8f98;
-  cursor: not-allowed;
-}
-
-.file-toolbar__status {
-  max-width: 220px;
-  overflow: hidden;
-  color: #4b5563;
-  font-size: 12px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.file-toolbar__input {
-  display: none;
 }
 
 .excalidraw-host {
