@@ -107,6 +107,16 @@ Portless のルーティング先ポートは起動ごとに変わるため、we
 
 `POST /api/files` は新規ファイルIDを作り、worker を起動します。現行 worker は Codex SDK を実行するため、Codex CLI/API の認証状態が必要です。
 
+## Documentation
+
+設計ドキュメントは [docs/README.md](./docs/README.md) を入口にします。
+
+主要な正本:
+
+- [Concept](./docs/concept.md)
+- [Architecture](./docs/architecture.md)
+- [y-excalidraw design notes](./docs/y-excalidraw/README.md)
+
 ## API
 
 ```text

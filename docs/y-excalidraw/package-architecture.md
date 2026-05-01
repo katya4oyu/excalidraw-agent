@@ -81,7 +81,7 @@ agentの方式は、`.excalidraw` ファイルを作ってAgent Skillsや `mcp_e
 
 ## y-excalidraw-core
 
-`core` はYjs上のExcalidraw document modelを読み書きする。ブラウザcallback、React、awareness、Codex SDK、ファイルシステムには依存しない。
+`core` はYjs上のExcalidraw document modelを読み書きする。ブラウザcallback、React、awareness、特定のagent runtime SDK、ファイルシステムには依存しない。
 
 責務:
 

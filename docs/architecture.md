@@ -295,6 +295,6 @@ The architecture currently has several incomplete areas:
 - Approval/rejection UI and proposal promotion are not complete.
 - Conflict detection is documented but not implemented end-to-end.
 - Browser binding is still mostly delegated to an external fork instead of being fully project-owned.
-- The canonical Yjs schema is described across multiple files and should be consolidated here as implementation catches up.
+- The canonical Yjs schema is still split between this overview and the detailed [y-excalidraw design notes](./y-excalidraw/README.md); it should be consolidated further as implementation catches up.
 
 These gaps are expected at this stage, but they should remain visible so future changes do not mistake target architecture for completed behavior.
