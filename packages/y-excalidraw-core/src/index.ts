@@ -1,4 +1,5 @@
 import * as Y from "yjs";
+import { generateKeyBetween, generateNKeysBetween } from "fractional-indexing";
 
 export type AgentRunStatus =
   | "queued"
@@ -79,7 +80,7 @@ export const agentGhostStyleByOperation = {
 
 export const createExcalidrawYMap = (
   element: Record<string, unknown>,
-  pos = `${Date.now()}:${crypto.randomUUID()}`,
+  pos = getElementOrderKey(element) ?? generateKeyBetween(null, null),
 ): Y.Map<unknown> => {
   const item = new Y.Map<unknown>();
   item.set("el", element);
@@ -128,7 +129,10 @@ export const appendElements = (
   stores: Pick<ExcalidrawYStores, "elements">,
   elements: Record<string, unknown>[],
 ): void => {
-  stores.elements.push(elements.map((element) => createExcalidrawYMap(element)));
+  const positions = generateNKeysBetween(getLastElementOrderKey(stores.elements), null, elements.length);
+  stores.elements.push(elements.map((element, index) =>
+    createExcalidrawYMap(element, getElementOrderKey(element) ?? positions[index]),
+  ));
 };
 
 export const isAgentGhostElement = (element: unknown): boolean => {
@@ -190,6 +194,32 @@ export const readAgentFooterState = (
 
 const isRecord = (value: unknown): value is Record<string, unknown> => {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+};
+
+const getElementOrderKey = (element: Record<string, unknown>): string | null => {
+  return isValidElementOrderKey(element.index) ? element.index : null;
+};
+
+const getLastElementOrderKey = (elements: Y.Array<Y.Map<unknown>>): string | null => {
+  const keys = elements
+    .toArray()
+    .map((item) => item.get("pos"))
+    .filter(isValidElementOrderKey)
+    .sort();
+  return keys.at(-1) ?? null;
+};
+
+const isValidElementOrderKey = (value: unknown): value is string => {
+  if (typeof value !== "string") {
+    return false;
+  }
+
+  try {
+    generateKeyBetween(value, null);
+    return true;
+  } catch {
+    return false;
+  }
 };
 
 const isAgentGhostOperation = (value: unknown): value is AgentGhostOperation => {

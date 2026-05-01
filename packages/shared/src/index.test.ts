@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
+import * as Y from "yjs";
 import {
   agentInstructionPlaceholderText,
   createAgentInstructionElement,
   createAgentInstructionNoteElements,
   createExcalidrawAgentMetadata,
+  createExcalidrawYMap,
   createNoteEmbedElement,
   createNoteRecord,
   fileIdFromDocumentName,
@@ -12,7 +14,9 @@ import {
   getExcalidrawAgentMetadata,
   getNoteEmbedMetadata,
   getNoteText,
+  insertExcalidrawElements,
   isAgentInstructionElement,
+  normalizeExcalidrawElementPositions,
   toDocumentName,
   withExcalidrawAgentMetadata,
 } from "./index.ts";
@@ -41,6 +45,32 @@ describe("document names", () => {
 });
 
 describe("agent instruction elements", () => {
+  test("uses valid fractional order keys for Yjs element positions", () => {
+    const ydoc = new Y.Doc();
+
+    insertExcalidrawElements(ydoc, [
+      { id: "shape-1", type: "rectangle", version: 1 },
+      { id: "shape-2", type: "rectangle", version: 1 },
+    ]);
+
+    const positions = ydoc.getArray<Y.Map<unknown>>("elements").toArray().map((item) => item.get("pos"));
+    assert.deepEqual(positions, ["a0", "a1"]);
+  });
+
+  test("normalizes legacy timestamp element positions", () => {
+    const ydoc = new Y.Doc();
+    ydoc.getArray<Y.Map<unknown>>("elements").push([
+      createExcalidrawYMap({ id: "shape-1", type: "rectangle", version: 1 }, "1777627026115:id-1"),
+      createExcalidrawYMap({ id: "shape-2", type: "rectangle", version: 1 }, "1777627026116:id-2"),
+    ]);
+
+    assert.equal(normalizeExcalidrawElementPositions(ydoc), true);
+    assert.deepEqual(
+      ydoc.getArray<Y.Map<unknown>>("elements").toArray().map((item) => item.get("pos")),
+      ["a0", "a1"],
+    );
+  });
+
   test("creates text elements marked for agent instructions", () => {
     const element = createAgentInstructionElement({
       x: 10,

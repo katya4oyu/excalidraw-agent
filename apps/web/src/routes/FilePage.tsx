@@ -1,12 +1,14 @@
-import { useState, useRef } from "react";
+import { useCallback, useEffect, useState, useRef } from "react";
 import type { PointerEvent as ReactPointerEvent, ReactNode } from "react";
 import { useParams } from "react-router";
 import { Excalidraw, Footer, WelcomeScreen } from "@excalidraw/excalidraw";
 import "@excalidraw/excalidraw/index.css";
+import { generateKeyBetween } from "fractional-indexing";
 import { getNoteEmbedMetadata } from "@excalidraw-agent/shared";
 import { startAgentRun } from "../api";
 import { useExcalidrawCollab } from "../collab/useExcalidrawCollab";
 import type { AgentFooterState } from "@excalidraw-agent/y-excalidraw-browser";
+import type { ExcalidrawImperativeAPI } from "@excalidraw/excalidraw/types";
 
 const canvasAgentPrompt = [
   "現在のExcalidrawキャンバス全体を確認してください。",
@@ -20,12 +22,14 @@ const defaultAgentModelLabel = "gpt-5.3";
 export function FilePage() {
   const { id } = useParams();
   const shellRef = useRef<HTMLDivElement | null>(null);
+  const imageInputRef = useRef<HTMLInputElement | null>(null);
   const [selectedModel, setSelectedModel] = useState(() => {
     return window.localStorage.getItem(agentModelStorageKey) ?? defaultAgentModelLabel;
   });
   const [isStartingRun, setIsStartingRun] = useState(false);
   const [runError, setRunError] = useState<string | null>(null);
   const {
+    api,
     agentFooterState,
     binding,
     isAgentInstructionMode,
@@ -39,6 +43,33 @@ export function FilePage() {
     excalidrawElement: shellRef.current,
   });
 
+  const openFallbackImagePicker = useCallback(() => {
+    imageInputRef.current?.click();
+  }, []);
+
+  useEffect(() => {
+    const shell = shellRef.current;
+    if (!shell) {
+      return;
+    }
+
+    const handleImageToolPointerDown = (event: PointerEvent) => {
+      const target = event.target;
+      if (!(target instanceof Element) || !target.closest("label")?.querySelector("[data-testid='toolbar-image']")) {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+      openFallbackImagePicker();
+    };
+
+    shell.addEventListener("pointerdown", handleImageToolPointerDown, { capture: true });
+    return () => {
+      shell.removeEventListener("pointerdown", handleImageToolPointerDown, { capture: true });
+    };
+  }, [openFallbackImagePicker]);
+
   if (!id) {
     return <main className="state-page">Missing file id</main>;
   }
@@ -46,6 +77,25 @@ export function FilePage() {
   return (
     <main className="canvas-page">
       <div ref={shellRef} className="excalidraw-host">
+        <input
+          ref={imageInputRef}
+          accept="image/*"
+          className="agent-image-input"
+          type="file"
+          onChange={async (event) => {
+            const file = event.currentTarget.files?.[0];
+            event.currentTarget.value = "";
+            if (!file || !api) {
+              return;
+            }
+
+            try {
+              await insertImageFile(api, file);
+            } catch (error) {
+              console.error(error);
+            }
+          }}
+        />
         <Excalidraw
           excalidrawAPI={setApi}
           isCollaborating={Boolean(binding)}
@@ -87,6 +137,114 @@ export function FilePage() {
       </div>
     </main>
   );
+}
+
+async function insertImageFile(api: ExcalidrawImperativeAPI, file: File): Promise<void> {
+  if (!file.type.startsWith("image/")) {
+    return;
+  }
+
+  const { dataURL, height: naturalHeight, width: naturalWidth } = await readImageFile(file);
+  const fileId = crypto.randomUUID();
+  const now = Date.now();
+
+  const maxWidth = 640;
+  const maxHeight = 480;
+  const scale = Math.min(1, maxWidth / naturalWidth, maxHeight / naturalHeight);
+  const width = Math.max(1, naturalWidth * scale);
+  const height = Math.max(1, naturalHeight * scale);
+  const appState = api.getAppState();
+  const zoom = appState.zoom.value;
+  const x = -appState.scrollX + (appState.width / zoom - width) / 2;
+  const y = -appState.scrollY + (appState.height / zoom - height) / 2;
+  const elements = api.getSceneElements();
+  const id = crypto.randomUUID();
+  const index = generateKeyBetween(getLastElementIndex(elements), null);
+
+  api.addFiles([
+    {
+      created: now,
+      dataURL: dataURL as never,
+      id: fileId as never,
+      lastRetrieved: now,
+      mimeType: file.type as never,
+    },
+  ]);
+  api.updateScene({
+    elements: [
+      ...elements,
+      {
+        id,
+        type: "image",
+        x,
+        y,
+        width,
+        height,
+        angle: 0,
+        strokeColor: "transparent",
+        backgroundColor: "transparent",
+        fillStyle: "solid",
+        strokeWidth: 1,
+        strokeStyle: "solid",
+        roughness: 0,
+        opacity: 100,
+        groupIds: [],
+        frameId: null,
+        roundness: null,
+        seed: Math.floor(Math.random() * 1_000_000),
+        version: 1,
+        versionNonce: Math.floor(Math.random() * 1_000_000),
+        isDeleted: false,
+        boundElements: null,
+        updated: now,
+        link: null,
+        locked: false,
+        fileId,
+        status: "saved",
+        scale: [1, 1],
+        crop: null,
+        index,
+      } as never,
+    ],
+    appState: {
+      selectedElementIds: {
+        [id]: true,
+      },
+    },
+  });
+}
+
+function readImageFile(file: File): Promise<{ dataURL: string; height: number; width: number }> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(reader.error ?? new Error("Failed to read image"));
+    reader.onload = () => {
+      if (typeof reader.result !== "string") {
+        reject(new Error("Failed to read image"));
+        return;
+      }
+
+      const image = new Image();
+      image.onerror = () => reject(new Error("Failed to load image"));
+      image.onload = () => {
+        resolve({
+          dataURL: reader.result as string,
+          height: image.naturalHeight || image.height,
+          width: image.naturalWidth || image.width,
+        });
+      };
+      image.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+function getLastElementIndex(elements: readonly Record<string, unknown>[]): string | null {
+  const indexes = elements
+    .map((element) => element.index)
+    .filter((index): index is string => typeof index === "string")
+    .sort();
+  return indexes.at(-1) ?? null;
 }
 
 function renderNoteEmbeddable(element: Record<string, unknown>) {

@@ -10,6 +10,18 @@ import {
 } from "./index.ts";
 
 describe("agent ghost elements", () => {
+  test("appends ghost elements with valid fractional order keys", () => {
+    const ydoc = new Y.Doc();
+    const elements = ydoc.getArray<Y.Map<unknown>>("elements");
+
+    appendElements({ elements }, [
+      { id: "ghost-1", type: "rectangle" },
+      { id: "ghost-2", type: "rectangle" },
+    ]);
+
+    assert.deepEqual(elements.toArray().map((item) => item.get("pos")), ["a0", "a1"]);
+  });
+
   test("marks elements as agent ghosts with operation styling", () => {
     const element = createAgentGhostElement(
       {

@@ -6,6 +6,7 @@ import {
   fileIdFromDocumentName,
   getAgentInstructionPrompt,
   getNoteText,
+  normalizeExcalidrawElementPositions,
   type CollabDocumentName,
   type FileId,
 } from "@excalidraw-agent/shared";
@@ -33,6 +34,7 @@ export const createCollabServer = (db: CollabDatabase, agents: CollabAgentSuperv
       if (persisted) {
         Y.applyUpdate(ydoc, persisted);
       }
+      normalizeExcalidrawElementPositions(ydoc);
 
       const fileId = fileIdFromDocumentName(documentName);
       if (fileId) {

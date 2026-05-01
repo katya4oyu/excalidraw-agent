@@ -8,6 +8,7 @@ import {
   createExcalidrawYMap,
   createFileId,
   getExcalidrawAgentMetadata,
+  normalizeExcalidrawElementPositions,
   toDocumentName,
   type CreateFileResponse,
   type ExcalidrawDocumentData,
@@ -204,8 +205,9 @@ function storeExcalidrawDocument(documentName: `file:${string}`, document: Excal
   yElements.push(
     elements
       .filter(isRecord)
-      .map((element, index) => createExcalidrawYMap(element, `${Date.now() + index}:${crypto.randomUUID()}`)),
+      .map((element) => createExcalidrawYMap(element)),
   );
+  normalizeExcalidrawElementPositions(ydoc);
 
   if (isRecord(document.files)) {
     for (const [id, file] of Object.entries(document.files)) {

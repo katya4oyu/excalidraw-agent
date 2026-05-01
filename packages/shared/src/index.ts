@@ -1,4 +1,5 @@
 import * as Y from "yjs";
+import { generateKeyBetween, generateNKeysBetween } from "fractional-indexing";
 
 export type FileId = string;
 export type CollabDocumentName = `file:${FileId}`;
@@ -224,7 +225,7 @@ export const withExcalidrawAgentMetadata = <T extends Record<string, unknown>>(
 
 export const createExcalidrawYMap = (
   element: Record<string, unknown>,
-  pos = `${Date.now()}:${crypto.randomUUID()}`,
+  pos = getElementOrderKey(element) ?? generateKeyBetween(null, null),
 ): Y.Map<unknown> => {
   const item = new Y.Map<unknown>();
   item.set("el", element);
@@ -236,17 +237,44 @@ export const insertExcalidrawElement = (
   ydoc: Y.Doc,
   element: Record<string, unknown>,
 ): void => {
-  ydoc.getArray<Y.Map<unknown>>("elements").push([createExcalidrawYMap(element)]);
+  const elements = ydoc.getArray<Y.Map<unknown>>("elements");
+  const pos = getElementOrderKey(element) ?? generateKeyBetween(getLastElementOrderKey(elements), null);
+  elements.push([createExcalidrawYMap(element, pos)]);
 };
 
 export const insertExcalidrawElements = (
   ydoc: Y.Doc,
   elements: readonly Record<string, unknown>[],
 ): void => {
-  const now = Date.now();
-  ydoc
-    .getArray<Y.Map<unknown>>("elements")
-    .push(elements.map((element, index) => createExcalidrawYMap(element, `${now + index}:${crypto.randomUUID()}`)));
+  const yElements = ydoc.getArray<Y.Map<unknown>>("elements");
+  const positions = generateNKeysBetween(getLastElementOrderKey(yElements), null, elements.length);
+  yElements.push(elements.map((element, index) =>
+    createExcalidrawYMap(element, getElementOrderKey(element) ?? positions[index]),
+  ));
+};
+
+export const normalizeExcalidrawElementPositions = (ydoc: Y.Doc): boolean => {
+  const elements = ydoc.getArray<Y.Map<unknown>>("elements");
+  const items = elements.toArray();
+  const seen = new Set<string>();
+  const shouldNormalize = items.some((item) => {
+    const pos = item.get("pos");
+    if (!isValidElementOrderKey(pos) || seen.has(pos)) {
+      return true;
+    }
+    seen.add(pos);
+    return false;
+  });
+
+  if (!shouldNormalize) {
+    return false;
+  }
+
+  const positions = generateNKeysBetween(null, null, items.length);
+  items.forEach((item, index) => {
+    item.set("pos", positions[index]);
+  });
+  return true;
 };
 
 export const createAgentInstructionElement = ({
@@ -572,4 +600,30 @@ export const createAgentDemoElement = (
 
 const isRecord = (value: unknown): value is Record<string, unknown> => {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+};
+
+const getElementOrderKey = (element: Record<string, unknown>): string | null => {
+  return isValidElementOrderKey(element.index) ? element.index : null;
+};
+
+const getLastElementOrderKey = (elements: Y.Array<Y.Map<unknown>>): string | null => {
+  const keys = elements
+    .toArray()
+    .map((item) => item.get("pos"))
+    .filter(isValidElementOrderKey)
+    .sort();
+  return keys.at(-1) ?? null;
+};
+
+const isValidElementOrderKey = (value: unknown): value is string => {
+  if (typeof value !== "string") {
+    return false;
+  }
+
+  try {
+    generateKeyBetween(value, null);
+    return true;
+  } catch {
+    return false;
+  }
 };

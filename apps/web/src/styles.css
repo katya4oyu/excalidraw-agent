@@ -66,6 +66,14 @@ body {
   height: 100%;
 }
 
+.agent-image-input {
+  position: fixed;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
 .excalidraw .excalidraw-hyperlinkContainer:has(.excalidraw-hyperlinkContainer-link[href*="/note?"]),
 .excalidraw .excalidraw-hyperlinkContainer:has(.excalidraw-hyperlinkContainer-link[href*="/note.html?"]) {
   display: none !important;
