@@ -21,7 +21,9 @@ colors:
   success: "#2b8a3e"
   warning: "#f5c354"
   error: "#d32f2f"
-  sticky: "#fff3bf"
+  note-avatar: "#1f2937"
+  note-meta: "#9a9aa0"
+  note-placeholder: "#a3a3a8"
   ghost: "#8f86ff"
 typography:
   headline-lg:
@@ -81,11 +83,23 @@ components:
     textColor: "{colors.on-primary-container}"
     rounded: "{rounded.lg}"
     size: 36px
-  sticky-note:
-    backgroundColor: "{colors.sticky}"
-    textColor: "{colors.ink}"
-    rounded: "{rounded.sm}"
+  note-card:
+    backgroundColor: "{colors.surface}"
+    textColor: "{colors.on-surface}"
+    rounded: "{rounded.xl}"
     padding: "{spacing.lg}"
+    typography: "{typography.body-md}"
+  note-meta-text:
+    textColor: "{colors.note-meta}"
+    typography: "{typography.label-md}"
+  note-placeholder-text:
+    textColor: "{colors.note-placeholder}"
+    typography: "{typography.body-md}"
+  note-avatar:
+    backgroundColor: "{colors.note-avatar}"
+    textColor: "{colors.on-primary}"
+    rounded: "{rounded.full}"
+    size: 36px
   ghost-proposal:
     backgroundColor: "{colors.ghost}"
     textColor: "{colors.ink}"
@@ -174,8 +188,10 @@ Existing Excalidraw components should be customized through Excalidraw's officia
 - **Muted Gray** (`#b8b8b8`): secondary metadata, disabled affordances, and low-emphasis dividers.
 - **Info Blue** (`#1e88e5`): proposed agent work and additive ghost previews.
 - **Success Green** (`#2b8a3e`): applied or verified agent states.
-- **Warning Yellow** (`#f5c354`): queued/running/applying states and sticky-note warmth.
+- **Warning Yellow** (`#f5c354`): queued/running/applying states and temporary attention states.
 - **Error Red** (`#d32f2f`): failed/conflicted states and destructive proposal markers.
+- **Note Avatar** (`#1f2937`): the compact initial circle inside generic Note embeds.
+- **Note Meta / Placeholder** (`#9a9aa0` / `#a3a3a8`): low-emphasis Note labels, canvas memo metadata, and empty text affordances.
 
 For Excalidraw itself, customize the documented variables on a scoped wrapper:
 
@@ -232,7 +248,9 @@ theme: {
       success: "#2b8a3e",
       warning: "#f5c354",
       error: "#d32f2f",
-      sticky: "#fff3bf",
+      "note-avatar": "#1f2937",
+      "note-meta": "#9a9aa0",
+      "note-placeholder": "#a3a3a8",
       ghost: "#8f86ff"
     },
     borderRadius: {
@@ -267,7 +285,8 @@ The shape language is slightly soft and hand-drawn.
 
 - Use 8px radius for most floating controls and custom buttons.
 - Use 6px radius for compact internal buttons and segmented controls.
-- Use 4px radius for sticky notes and small affordances.
+- Use 12px radius for generic Note embeds so they read as light canvas cards rather than hand-drawn primitives.
+- Use 4px radius for small affordances and compact diagram details.
 - Use `999px` only for dots, pills, and presence/status indicators.
 - Do not mix very sharp enterprise-style panels with playful canvas elements.
 
@@ -275,7 +294,7 @@ For diagram and proposal elements:
 
 - Add/update ghost proposals should use dashed blue or purple strokes with reduced opacity.
 - Delete proposals should use red dashed strokes and low opacity.
-- Sticky notes should use warm yellow fills and compact handwritten text.
+- Note embeds should use a white card surface, soft border, compact avatar, sans-serif text, and muted metadata. They are generic canvas memos, not automatic agent instructions and not yellow sticky notes.
 - Agent instruction notes should look temporary and human, not like permanent app chrome.
 
 ## Components
@@ -290,9 +309,9 @@ Most Excalidraw internals should remain visually native: tool buttons, color pic
 
 - **Agent footer status**: a compact floating island with inline status dot, short label, optional metadata, and one icon button. Use `surface`, `border`, `shadow`, `label-md`, and 8px radius.
 - **Agent status dot**: 8px circle. Use warning for queued/running/applying, info for proposed, success for applied, and error for failed/conflicted.
-- **Instruction note button**: 24px icon button, transparent by default, `surface-high` on hover, `primary-light` when pressed.
+- **Note button**: 24px icon button, transparent by default, `surface-high` on hover, `primary-light` when pressed.
 - **Ghost proposal preview**: dashed border, reduced opacity, locked visual feel, and a color keyed to operation type.
-- **Sticky note**: `sticky` background, ink text, low-radius corners, no heavy shadow, small folded-corner detail only when it does not distract.
+- **Note embed**: same-origin iframe card used for `/note`. Use `surface` background, `on-surface` title text, `note-meta` metadata, `note-placeholder` empty text, `note-avatar` initial circle, 12px radius, and a light border/shadow. It should feel like a compact tweet/card-style memo on the canvas, not like a yellow desktop sticky note. Do not put a Run Agent button inside the note; agent execution must stay explicit in the parent workflow.
 - **Dialogs or future side panels**: restrained and utilitarian. They may be denser than landing pages, but must still use the canvas palette and avoid nested cards.
 
 ## Do's and Don'ts
