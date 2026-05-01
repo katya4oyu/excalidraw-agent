@@ -47,8 +47,7 @@ app.get("/health", (c) => {
 app.post("/api/files", (c) => {
   const id = createFileId();
   const documentName = toDocumentName(id);
-  db.createFile(id, documentName);
-  agents.start(id);
+  db.createFile(id, documentName, "idle");
 
   return c.json<CreateFileResponse>({ id }, 201);
 });
@@ -102,7 +101,20 @@ app.post("/api/files/:id/agent-runs", async (c) => {
     return c.json({ error: "prompt is required" }, 400);
   }
 
-  const started = agents.start(file.id, { prompt });
+  agents.ensureWorker(file.id);
+  const runId = `agent-run-${crypto.randomUUID()}`;
+  const requestId = `api-run-${crypto.randomUUID()}`;
+  storeApiAgentRunRequest(file.documentName, {
+    prompt,
+    requestId,
+    runId,
+  });
+  const started = agents.enqueueRun(file.id, {
+    fileId: file.id,
+    prompt,
+    requestId,
+    runId,
+  });
   return c.json({
     fileId: file.id,
     started,
@@ -199,6 +211,38 @@ function storeExcalidrawDocument(documentName: `file:${string}`, document: Excal
       yAppState.set(key, value);
     }
   }
+
+  db.storeDocument(documentName, Y.encodeStateAsUpdate(ydoc));
+}
+
+function storeApiAgentRunRequest(
+  documentName: `file:${string}`,
+  request: { prompt: string; requestId: string; runId: string },
+): void {
+  const ydoc = new Y.Doc();
+  const persisted = db.loadDocument(documentName);
+  if (persisted) {
+    Y.applyUpdate(ydoc, persisted);
+  }
+
+  const now = Date.now();
+  ydoc.transact(() => {
+    ydoc.getMap<Record<string, unknown>>("agentInstructionRequests").set(request.requestId, {
+      status: "running",
+      source: "api",
+      prompt: request.prompt,
+      runId: request.runId,
+      createdAt: now,
+      updatedAt: now,
+    });
+    ydoc.getMap<Record<string, unknown>>("agentRuns").set(request.runId, {
+      status: "running",
+      source: "api",
+      prompt: request.prompt,
+      createdAt: now,
+      updatedAt: now,
+    });
+  });
 
   db.storeDocument(documentName, Y.encodeStateAsUpdate(ydoc));
 }

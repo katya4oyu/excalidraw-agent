@@ -2,6 +2,7 @@ import { Hocuspocus } from "@hocuspocus/server";
 import * as Y from "yjs";
 import { randomUUID } from "node:crypto";
 import {
+  type AgentRunQueueRequest,
   fileIdFromDocumentName,
   getAgentInstructionPrompt,
   type CollabDocumentName,
@@ -14,6 +15,7 @@ interface CollabDatabase {
 }
 
 interface CollabAgentSupervisor extends AgentInstructionStarter {
+  ensureWorker(fileId: FileId): unknown;
   markFromDocumentName(documentName: string, status: "verified"): void;
 }
 
@@ -50,7 +52,7 @@ export const createCollabServer = (db: CollabDatabase, agents: CollabAgentSuperv
         startAgentFromInstructionRequests(document, fileId, agents);
       }
 
-      if (!fileId || !agents.isRunning(fileId)) {
+      if (!fileId || !agents.isRunActive(fileId)) {
         agents.markFromDocumentName(documentName, "verified");
       }
     },
@@ -58,8 +60,9 @@ export const createCollabServer = (db: CollabDatabase, agents: CollabAgentSuperv
 };
 
 interface AgentInstructionStarter {
-  isRunning(fileId: FileId): boolean;
-  start(fileId: FileId, options: { prompt?: string }): boolean;
+  enqueueRun(fileId: FileId, request: AgentRunQueueRequest): boolean;
+  ensureWorker(fileId: FileId): unknown;
+  isRunActive(fileId: FileId): boolean;
 }
 
 export const startAgentFromInstructionRequests = (
@@ -67,7 +70,9 @@ export const startAgentFromInstructionRequests = (
   fileId: FileId,
   agents: AgentInstructionStarter,
 ): void => {
-  if (agents.isRunning(fileId)) {
+  agents.ensureWorker(fileId);
+
+  if (agents.isRunActive(fileId)) {
     return;
   }
 
@@ -97,13 +102,18 @@ export const startAgentFromInstructionRequests = (
       continue;
     }
 
-    const started = agents.start(fileId, { prompt: request.prompt });
-    if (!started) {
+    const now = Date.now();
+    const runId = `agent-run-${randomUUID()}`;
+    const queued = agents.enqueueRun(fileId, {
+      fileId,
+      prompt: request.prompt,
+      requestId,
+      runId,
+    });
+    if (!queued) {
       return;
     }
 
-    const now = Date.now();
-    const runId = `agent-run-${randomUUID()}`;
     document.transact(() => {
       requests.set(requestId, {
         status: "running",

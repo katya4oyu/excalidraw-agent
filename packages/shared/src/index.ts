@@ -35,7 +35,27 @@ export interface AgentWorkerOptions {
   workspaceRoot: string;
   workspaceTemplate: string;
   prompt?: string;
+  daemon?: boolean;
 }
+
+export interface AgentRunQueueRequest {
+  fileId: FileId;
+  requestId: string;
+  runId: string;
+  prompt: string;
+}
+
+export type AgentWorkerRunFinishedStatus = "proposed" | "conflicted" | "failed";
+
+export type AgentWorkerRequestMessage =
+  | { type: "runQueued"; fileId: FileId; request: AgentRunQueueRequest }
+  | { type: "shutdown"; reason?: string };
+
+export type AgentWorkerResponseMessage =
+  | { type: "ready"; fileId: FileId }
+  | { type: "runStarted"; fileId: FileId; runId: string }
+  | { type: "runFinished"; fileId: FileId; runId: string; status: AgentWorkerRunFinishedStatus }
+  | { type: "workerFailed"; fileId: FileId; error: string; runId?: string };
 
 export interface ExcalidrawAgentMetadata {
   schemaVersion: 1;

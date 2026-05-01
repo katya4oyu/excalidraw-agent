@@ -16,7 +16,8 @@ describe("agent instruction request trigger", () => {
 
     startAgentFromInstructionRequests(ydoc, "file-1", agents);
 
-    assert.deepEqual(agents.starts, []);
+    assert.deepEqual(agents.enqueues, []);
+    assert.deepEqual(agents.ensureWorkerCalls, ["file-1"]);
     assert.deepEqual(ydoc.getMap("agentRuns").toJSON(), {});
   });
 
@@ -35,7 +36,10 @@ describe("agent instruction request trigger", () => {
 
     startAgentFromInstructionRequests(ydoc, "file-1", agents);
 
-    assert.deepEqual(agents.starts, [{ fileId: "file-1", prompt: "この範囲を整理して" }]);
+    assert.equal(agents.enqueues.length, 1);
+    assert.equal(agents.enqueues[0]?.fileId, "file-1");
+    assert.equal(agents.enqueues[0]?.prompt, "この範囲を整理して");
+    assert.equal(agents.enqueues[0]?.requestId, textId);
     assert.equal(getRequestStatus(ydoc, textId), "running");
     assert.equal(Object.values(ydoc.getMap("agentRuns").toJSON()).length, 1);
   });
@@ -55,11 +59,11 @@ describe("agent instruction request trigger", () => {
 
     startAgentFromInstructionRequests(ydoc, "file-1", agents);
 
-    assert.deepEqual(agents.starts, []);
+    assert.deepEqual(agents.enqueues, []);
     assert.equal(getRequestStatus(ydoc, textId), "stale");
   });
 
-  test("starts queued requests when a persisted document is loaded", async () => {
+  test("ensures a worker and starts queued requests when a persisted document is loaded", async () => {
     const documentName = toDocumentName("file-1");
     const persisted = createInstructionDocument("再接続時に実行して");
     const textId = getTextInstructionId(persisted);
@@ -79,21 +83,95 @@ describe("agent instruction request trigger", () => {
       documentName,
     } as Parameters<NonNullable<typeof collab.configuration.onLoadDocument>>[0]);
 
-    assert.deepEqual(agents.starts, [{ fileId: "file-1", prompt: "再接続時に実行して" }]);
+    assert.deepEqual(agents.ensureWorkerCalls, ["file-1"]);
+    assert.equal(agents.enqueues.length, 1);
+    assert.equal(agents.enqueues[0]?.fileId, "file-1");
+    assert.equal(agents.enqueues[0]?.prompt, "再接続時に実行して");
     assert.ok(loaded instanceof Y.Doc);
     assert.equal(getRequestStatus(loaded, textId), "running");
+  });
+
+  test("reconnecting the same document reuses the existing worker", async () => {
+    const documentName = toDocumentName("file-1");
+    const db = new FakeDatabase(documentName, null);
+    const agents = new FakeAgentStarter();
+    const collab = createCollabServer(db, agents);
+
+    await collab.configuration.onLoadDocument?.({
+      documentName,
+    } as Parameters<NonNullable<typeof collab.configuration.onLoadDocument>>[0]);
+    await collab.configuration.onLoadDocument?.({
+      documentName,
+    } as Parameters<NonNullable<typeof collab.configuration.onLoadDocument>>[0]);
+
+    assert.deepEqual(agents.ensureWorkerCalls, ["file-1", "file-1"]);
+    assert.equal(agents.workerCreateCount, 1);
+    assert.deepEqual(agents.enqueues, []);
+  });
+
+  test("leaves a second queued request untouched while a run is active", () => {
+    const ydoc = createInstructionDocument("最初の指示");
+    const firstTextId = getTextInstructionId(ydoc);
+    const secondText = createAgentInstructionNoteElements({
+      x: 10,
+      y: 180,
+      text: "次の指示",
+    });
+    const secondTextId = String(secondText.find((element) => element.type === "text")?.id);
+    ydoc
+      .getArray<Y.Map<unknown>>("elements")
+      .push(secondText.map((element) => createExcalidrawYMap(element)));
+    ydoc.getMap("agentInstructionRequests").set(firstTextId, {
+      status: "queued",
+      source: "instruction-note",
+      prompt: "最初の指示",
+      elementId: firstTextId,
+      createdAt: 1,
+      updatedAt: 1,
+    });
+    ydoc.getMap("agentInstructionRequests").set(secondTextId, {
+      status: "queued",
+      source: "instruction-note",
+      prompt: "次の指示",
+      elementId: secondTextId,
+      createdAt: 2,
+      updatedAt: 2,
+    });
+    const agents = new FakeAgentStarter();
+
+    startAgentFromInstructionRequests(ydoc, "file-1", agents);
+    agents.active = true;
+    startAgentFromInstructionRequests(ydoc, "file-1", agents);
+
+    assert.equal(getRequestStatus(ydoc, firstTextId), "running");
+    assert.equal(getRequestStatus(ydoc, secondTextId), "queued");
+    assert.equal(agents.enqueues.length, 1);
   });
 });
 
 class FakeAgentStarter {
-  readonly starts: Array<{ fileId: FileId; prompt: string | undefined }> = [];
+  readonly enqueues: Array<{ fileId: FileId; prompt: string; requestId: string; runId: string }> = [];
+  readonly ensureWorkerCalls: FileId[] = [];
+  active = false;
+  private readonly workers = new Set<FileId>();
 
-  isRunning(): boolean {
-    return false;
+  get workerCreateCount(): number {
+    return this.workers.size;
   }
 
-  start(fileId: FileId, options: { prompt?: string }): boolean {
-    this.starts.push({ fileId, prompt: options.prompt });
+  ensureWorker(fileId: FileId): unknown {
+    this.ensureWorkerCalls.push(fileId);
+    this.workers.add(fileId);
+    return {};
+  }
+
+  isRunActive(): boolean {
+    return this.active;
+  }
+
+  enqueueRun(fileId: FileId, request: { prompt: string; requestId: string; runId: string }): boolean {
+    this.enqueues.push({ fileId, prompt: request.prompt, requestId: request.requestId, runId: request.runId });
+    this.active = true;
     return true;
   }
 
@@ -102,9 +180,9 @@ class FakeAgentStarter {
 
 class FakeDatabase {
   private readonly documentName: string;
-  private readonly state: Uint8Array;
+  private readonly state: Uint8Array | null;
 
-  constructor(documentName: string, state: Uint8Array) {
+  constructor(documentName: string, state: Uint8Array | null) {
     this.documentName = documentName;
     this.state = state;
   }
