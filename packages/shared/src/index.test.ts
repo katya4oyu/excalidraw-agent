@@ -5,9 +5,13 @@ import {
   createAgentInstructionElement,
   createAgentInstructionNoteElements,
   createExcalidrawAgentMetadata,
+  createNoteEmbedElement,
+  createNoteRecord,
   fileIdFromDocumentName,
   getAgentInstructionPrompt,
   getExcalidrawAgentMetadata,
+  getNoteEmbedMetadata,
+  getNoteText,
   isAgentInstructionElement,
   toDocumentName,
   withExcalidrawAgentMetadata,
@@ -118,5 +122,43 @@ describe("agent instruction elements", () => {
     assert.equal(getAgentInstructionPrompt(placeholderText), null);
     assert.equal(getAgentInstructionPrompt(editedText), "この付箋の内容で図を整理して");
     assert.equal(getAgentInstructionPrompt({ type: "text", text: "ordinary" }), null);
+  });
+
+  test("creates generic embeddable notes", () => {
+    const element = createNoteEmbedElement({
+      fileId: "file-1",
+      link: "http://127.0.0.1:5173/note?fileId=file-1&noteId=note-1",
+      noteId: "note-1",
+      x: 10,
+      y: 20,
+    });
+
+    assert.equal(element.type, "embeddable");
+    assert.equal(element.id, "note-1");
+    assert.equal(element.width, 420);
+    assert.equal(element.height, 220);
+    assert.equal(element.link, "http://127.0.0.1:5173/note?fileId=file-1&noteId=note-1");
+    assert.deepEqual(getNoteEmbedMetadata(element), {
+      schemaVersion: 1,
+      kind: "note-embed",
+      fileId: "file-1",
+      noteId: "note-1",
+    });
+  });
+
+  test("stores note text outside the embeddable element", () => {
+    const note = createNoteRecord("file-1", "note-1", 1);
+
+    assert.deepEqual(note, {
+      schemaVersion: 1,
+      fileId: "file-1",
+      noteId: "note-1",
+      text: "",
+      status: "idle",
+      createdAt: 1,
+      updatedAt: 1,
+    });
+    assert.equal(getNoteText(note), null);
+    assert.equal(getNoteText({ ...note, text: "  図を整理して  " }), "図を整理して");
   });
 });

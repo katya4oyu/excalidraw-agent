@@ -89,10 +89,58 @@ export interface AgentInstructionElementOptions {
   height?: number;
 }
 
+export interface NoteEmbedOptions {
+  fileId: FileId;
+  link: string;
+  noteId?: string;
+  x: number;
+  y: number;
+  width?: number;
+  height?: number;
+}
+
 export interface ExcalidrawAgentInstructionElementMetadata {
   schemaVersion: 1;
   kind: "instruction";
 }
+
+export interface ExcalidrawNoteEmbedMetadata {
+  schemaVersion: 1;
+  kind: "note-embed";
+  fileId: FileId;
+  noteId: string;
+}
+
+export type NoteStatus =
+  | "idle"
+  | "queued"
+  | "running"
+  | "proposed"
+  | "conflicted"
+  | "failed";
+
+export interface NoteRecord {
+  schemaVersion: 1;
+  fileId: FileId;
+  noteId: string;
+  text: string;
+  status: NoteStatus;
+  requestId?: string;
+  runId?: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export type NoteToParentMessage =
+  | { type: "excalidraw-agent:noteReady"; fileId: FileId; noteId: string }
+  | { type: "excalidraw-agent:noteTextChanged"; fileId: FileId; noteId: string; text: string }
+  | { type: "excalidraw-agent:noteResizeRequested"; fileId: FileId; noteId: string; width: number; height: number };
+
+export type ParentToNoteMessage = {
+  type: "excalidraw-agent:noteState";
+  fileId: FileId;
+  note: NoteRecord;
+};
 
 export const agentInstructionPlaceholderText = "Agentへの置き手紙を書いてください";
 
@@ -334,6 +382,70 @@ export const createAgentInstructionNoteElements = ({
   ];
 };
 
+export const createNoteRecord = (
+  fileId: FileId,
+  noteId: string,
+  now = Date.now(),
+): NoteRecord => ({
+  schemaVersion: 1,
+  fileId,
+  noteId,
+  text: "",
+  status: "idle",
+  createdAt: now,
+  updatedAt: now,
+});
+
+export const createNoteEmbedElement = ({
+  fileId,
+  height = 220,
+  link,
+  noteId = `note-${crypto.randomUUID()}`,
+  width = 420,
+  x,
+  y,
+}: NoteEmbedOptions): Record<string, unknown> => {
+  const now = Date.now();
+
+  return {
+    id: noteId,
+    type: "embeddable",
+    x,
+    y,
+    width,
+    height,
+    angle: 0,
+    strokeColor: "#d0d0d0",
+    backgroundColor: "#ffffff",
+    fillStyle: "solid",
+    strokeWidth: 1,
+    strokeStyle: "solid",
+    roughness: 1,
+    opacity: 100,
+    groupIds: [],
+    frameId: null,
+    roundness: {
+      type: 3,
+    },
+    seed: Math.floor(Math.random() * 1_000_000),
+    version: 1,
+    versionNonce: Math.floor(Math.random() * 1_000_000),
+    isDeleted: false,
+    boundElements: null,
+    updated: now,
+    link,
+    locked: false,
+    customData: {
+      excalidrawAgent: {
+        schemaVersion: 1,
+        kind: "note-embed",
+        fileId,
+        noteId,
+      } satisfies ExcalidrawNoteEmbedMetadata,
+    },
+  };
+};
+
 export const isAgentInstructionElement = (element: unknown): boolean => {
   if (!isRecord(element)) {
     return false;
@@ -364,6 +476,57 @@ export const getAgentInstructionPrompt = (element: unknown): string | null => {
 
   return text;
 };
+
+export const getNoteEmbedMetadata = (
+  element: unknown,
+): ExcalidrawNoteEmbedMetadata | null => {
+  if (!isRecord(element)) {
+    return null;
+  }
+
+  const customData = element.customData;
+  if (!isRecord(customData)) {
+    return null;
+  }
+
+  const metadata = customData.excalidrawAgent;
+  if (
+    !isRecord(metadata) ||
+    metadata.schemaVersion !== 1 ||
+    metadata.kind !== "note-embed" ||
+    typeof metadata.fileId !== "string" ||
+    typeof metadata.noteId !== "string"
+  ) {
+    return null;
+  }
+
+  return {
+    schemaVersion: 1,
+    kind: "note-embed",
+    fileId: metadata.fileId,
+    noteId: metadata.noteId,
+  };
+};
+
+export const getNoteText = (note: unknown): string | null => {
+  if (!isRecord(note) || note.schemaVersion !== 1 || typeof note.text !== "string") {
+    return null;
+  }
+
+  const text = note.text.trim();
+  return text ? text : null;
+};
+
+export type AgentInstructionEmbedOptions = NoteEmbedOptions;
+export type ExcalidrawAgentInstructionEmbedMetadata = ExcalidrawNoteEmbedMetadata;
+export type AgentInstructionNoteStatus = NoteStatus;
+export type AgentInstructionNoteRecord = NoteRecord;
+export type StickyNoteToParentMessage = NoteToParentMessage;
+export type ParentToStickyNoteMessage = ParentToNoteMessage;
+export const createAgentInstructionNoteRecord = createNoteRecord;
+export const createAgentInstructionNoteEmbedElement = createNoteEmbedElement;
+export const getAgentInstructionEmbedMetadata = getNoteEmbedMetadata;
+export const getAgentInstructionNotePrompt = getNoteText;
 
 export const createAgentDemoElement = (
   fileId: FileId,

@@ -5,6 +5,7 @@ import {
   type AgentRunQueueRequest,
   fileIdFromDocumentName,
   getAgentInstructionPrompt,
+  getNoteText,
   type CollabDocumentName,
   type FileId,
 } from "@excalidraw-agent/shared";
@@ -78,6 +79,8 @@ export const startAgentFromInstructionRequests = (
 
   const requests = document.getMap<Record<string, unknown>>("agentInstructionRequests");
   const agentRuns = document.getMap<Record<string, unknown>>("agentRuns");
+  const notes = document.getMap<Record<string, unknown>>("notes");
+  const legacyInstructionNotes = document.getMap<Record<string, unknown>>("agentInstructionNotes");
   const elementsById = new Map<string, unknown>();
   for (const item of document.getArray<Y.Map<unknown>>("elements").toArray()) {
     const element = item.get("el");
@@ -91,8 +94,11 @@ export const startAgentFromInstructionRequests = (
       continue;
     }
 
-    const element = elementsById.get(request.elementId);
-    const currentPrompt = getAgentInstructionPrompt(element);
+    const currentPrompt = getCurrentInstructionPrompt(request, {
+      elementsById,
+      legacyInstructionNotes,
+      notes,
+    });
     if (currentPrompt !== request.prompt) {
       requests.set(requestId, {
         ...request,
@@ -120,7 +126,9 @@ export const startAgentFromInstructionRequests = (
         source: "instruction-note",
         prompt: request.prompt,
         runId,
-        elementId: request.elementId,
+        ...(request.elementId ? { elementId: request.elementId } : {}),
+        ...(request.noteId ? { noteId: request.noteId } : {}),
+        ...(request.sourceNoteId ? { sourceNoteId: request.sourceNoteId } : {}),
         createdAt: request.createdAt,
         updatedAt: now,
       });
@@ -128,7 +136,9 @@ export const startAgentFromInstructionRequests = (
         status: "running",
         source: "instruction-note",
         prompt: request.prompt,
-        instructionElementIds: [request.elementId],
+        ...(request.elementId ? { instructionElementIds: [request.elementId] } : {}),
+        ...(request.noteId ? { sourceNoteId: request.noteId } : {}),
+        ...(request.sourceNoteId ? { sourceNoteId: request.sourceNoteId } : {}),
         createdAt: now,
         updatedAt: now,
       });
@@ -137,24 +147,52 @@ export const startAgentFromInstructionRequests = (
   }
 };
 
+const getCurrentInstructionPrompt = (
+  request: QueuedInstructionRequest,
+  stores: {
+    elementsById: Map<string, unknown>;
+    legacyInstructionNotes: Y.Map<Record<string, unknown>>;
+    notes: Y.Map<Record<string, unknown>>;
+  },
+): string | null => {
+  const noteId = request.sourceNoteId ?? request.noteId;
+  if (noteId) {
+    return getNoteText(stores.notes.get(noteId) ?? stores.legacyInstructionNotes.get(noteId));
+  }
+
+  if (request.elementId) {
+    return getAgentInstructionPrompt(stores.elementsById.get(request.elementId));
+  }
+
+  return null;
+};
+
 const isRecord = (value: unknown): value is Record<string, unknown> => {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 };
 
-const isQueuedInstructionRequest = (value: unknown): value is {
+type QueuedInstructionRequest = {
   createdAt: number;
-  elementId: string;
+  elementId?: string;
+  noteId?: string;
+  sourceNoteId?: string;
   prompt: string;
   source: "instruction-note";
   status: "queued";
-} => {
+};
+
+const isQueuedInstructionRequest = (value: unknown): value is QueuedInstructionRequest => {
   return (
     isRecord(value) &&
     value.status === "queued" &&
     value.source === "instruction-note" &&
     typeof value.prompt === "string" &&
     value.prompt.trim().length > 0 &&
-    typeof value.elementId === "string" &&
+    (
+      typeof value.elementId === "string" ||
+      typeof value.noteId === "string" ||
+      typeof value.sourceNoteId === "string"
+    ) &&
     typeof value.createdAt === "number"
   );
 };

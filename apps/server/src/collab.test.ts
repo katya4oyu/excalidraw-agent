@@ -44,6 +44,37 @@ describe("agent instruction request trigger", () => {
     assert.equal(Object.values(ydoc.getMap("agentRuns").toJSON()).length, 1);
   });
 
+  test("starts an agent from a queued embeddable note request matching the note text", () => {
+    const ydoc = new Y.Doc();
+    ydoc.getMap("notes").set("note-1", {
+      schemaVersion: 1,
+      fileId: "file-1",
+      noteId: "note-1",
+      text: "この付箋の内容で図を整理して",
+      status: "queued",
+      createdAt: 1,
+      updatedAt: 1,
+    });
+    ydoc.getMap("agentInstructionRequests").set("request-1", {
+      status: "queued",
+      source: "instruction-note",
+      prompt: "この付箋の内容で図を整理して",
+      sourceNoteId: "note-1",
+      createdAt: 1,
+      updatedAt: 1,
+    });
+    const agents = new FakeAgentStarter();
+
+    startAgentFromInstructionRequests(ydoc, "file-1", agents);
+
+    const runs = Object.values(ydoc.getMap<Record<string, unknown>>("agentRuns").toJSON());
+    assert.equal(agents.enqueues.length, 1);
+    assert.equal(agents.enqueues[0]?.requestId, "request-1");
+    assert.equal(getRequestStatus(ydoc, "request-1"), "running");
+    assert.equal(runs.length, 1);
+    assert.equal(runs[0]?.sourceNoteId, "note-1");
+  });
+
   test("marks queued requests stale when the note text changed before the server sees it", () => {
     const ydoc = createInstructionDocument("現在の本文");
     const textId = getTextInstructionId(ydoc);
@@ -61,6 +92,33 @@ describe("agent instruction request trigger", () => {
 
     assert.deepEqual(agents.enqueues, []);
     assert.equal(getRequestStatus(ydoc, textId), "stale");
+  });
+
+  test("marks queued embeddable note requests stale when note text changed", () => {
+    const ydoc = new Y.Doc();
+    ydoc.getMap("notes").set("note-1", {
+      schemaVersion: 1,
+      fileId: "file-1",
+      noteId: "note-1",
+      text: "現在の本文",
+      status: "queued",
+      createdAt: 1,
+      updatedAt: 1,
+    });
+    ydoc.getMap("agentInstructionRequests").set("request-1", {
+      status: "queued",
+      source: "instruction-note",
+      prompt: "古い本文",
+      sourceNoteId: "note-1",
+      createdAt: 1,
+      updatedAt: 1,
+    });
+    const agents = new FakeAgentStarter();
+
+    startAgentFromInstructionRequests(ydoc, "file-1", agents);
+
+    assert.deepEqual(agents.enqueues, []);
+    assert.equal(getRequestStatus(ydoc, "request-1"), "stale");
   });
 
   test("ensures a worker and starts queued requests when a persisted document is loaded", async () => {
