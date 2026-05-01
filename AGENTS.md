@@ -16,3 +16,14 @@ Please provide all answers in Japanese.
 - After committing, run `git status --short` and leave the worktree clean unless there are intentional uncommitted changes. If anything remains uncommitted, explain exactly what remains and why.
 - Do not commit disposable screenshots, browser verification images, generated previews, or other temporary inspection artifacts.
 - If verification cannot be run, still commit the completed changes when appropriate and state the verification gap in the final response.
+
+## Local Development Servers
+
+- Use the portless tasks for browser-facing verification by default:
+  - `mise run server:portless`
+  - `mise run web:portless`
+- Prefer the portless URLs over raw localhost URLs:
+  - web: `https://excalidraw-agent.localhost`
+  - API: `https://api.excalidraw-agent.localhost`
+- Before starting another dev server, check for existing listeners and avoid multiple Vite/server instances for the same app. If an old instance is stale or conflicting, stop it instead of starting a new one.
+- Use raw `mise run web` / `mise run server` only for narrow debugging, and explain why portless is not being used.
