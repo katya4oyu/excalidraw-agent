@@ -43,3 +43,22 @@ export async function importFile(
 
   return response.json() as Promise<ImportFileResponse>;
 }
+
+export async function startAgentRun(
+  fileId: string,
+  prompt: string,
+): Promise<{ agentStatus: string; fileId: string; started: boolean }> {
+  const response = await fetch(`/api/files/${encodeURIComponent(fileId)}/agent-runs`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({ prompt }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to start agent run: ${response.status}`);
+  }
+
+  return response.json() as Promise<{ agentStatus: string; fileId: string; started: boolean }>;
+}

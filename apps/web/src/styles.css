@@ -91,13 +91,13 @@ body {
   display: none;
 }
 
-.agent-footer-status {
-  min-height: 2.25rem;
+.agent-footer-tools {
+  height: 2.75rem;
   display: inline-flex;
   align-items: center;
-  gap: 0.625rem;
+  gap: 0.25rem;
   margin: 0 0.75rem;
-  padding: 0 1rem;
+  padding: 0 0.25rem;
   border: 1px solid var(--default-border-color);
   border-radius: var(--border-radius-lg);
   background: var(--island-bg-color);
@@ -107,50 +107,96 @@ body {
   pointer-events: all;
 }
 
-.agent-footer-status__dot {
-  width: 0.5rem;
-  height: 0.5rem;
+.agent-footer-tools__status {
+  width: 1.75rem;
+  height: 2.25rem;
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 auto;
+}
+
+.agent-footer-tools__dot {
+  width: 0.45rem;
+  height: 0.45rem;
   flex: 0 0 auto;
   border-radius: 999px;
   background: #868e96;
 }
 
-.agent-footer-status__dot--queued,
-.agent-footer-status__dot--running,
-.agent-footer-status__dot--applying {
+.agent-footer-tools__dot--queued,
+.agent-footer-tools__dot--running,
+.agent-footer-tools__dot--applying {
   background: #f08c00;
 }
 
-.agent-footer-status__dot--proposed {
+.agent-footer-tools__dot--proposed {
   background: #1e88e5;
 }
 
-.agent-footer-status__dot--applied {
+.agent-footer-tools__dot--applied {
   background: #2b8a3e;
 }
 
-.agent-footer-status__dot--failed,
-.agent-footer-status__dot--conflicted {
+.agent-footer-tools__dot--failed,
+.agent-footer-tools__dot--conflicted {
   background: #d32f2f;
 }
 
-.agent-footer-status__label,
-.agent-footer-status__meta {
-  white-space: nowrap;
-}
-
-.agent-footer-status__meta {
-  color: var(--text-secondary-color);
-}
-
-.agent-footer-status__button {
-  width: 1.5rem;
+.agent-footer-tools__separator {
+  width: 1px;
   height: 1.5rem;
-  margin-inline-start: 0.125rem;
+  margin: 0 0.125rem;
+  background: var(--default-border-color);
+}
+
+.agent-footer-tools__model {
+  position: relative;
+  width: 4.75rem;
+  height: 2.25rem;
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  border-radius: var(--border-radius-md);
+  color: var(--text-primary-color);
+}
+
+.agent-footer-tools__model:hover {
+  background: var(--button-hover-bg);
+}
+
+.agent-footer-tools__model-text {
+  width: 100%;
+  display: inline-flex;
+  align-items: center;
+}
+
+.agent-footer-tools__select {
+  width: 100%;
+  height: 2.25rem;
+  appearance: none;
+  border: 0;
+  padding: 0 1.35rem 0 0.625rem;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  line-height: 1;
+  outline: none;
+  cursor: pointer;
+}
+
+.agent-footer-tools__model .agent-footer-tools__icon {
+  position: absolute;
+  right: 0.45rem;
+  pointer-events: none;
+}
+
+.agent-footer-tools__button {
+  width: 2.25rem;
+  height: 2.25rem;
   display: inline-grid;
   place-items: center;
   padding: 0;
-  border: 1px solid var(--default-border-color);
+  border: 1px solid transparent;
   border-radius: var(--border-radius-md);
   background: transparent;
   color: var(--text-primary-color);
@@ -158,34 +204,26 @@ body {
   cursor: pointer;
 }
 
-.agent-footer-status__button:hover {
+.agent-footer-tools__button:hover:not(:disabled) {
   background: var(--button-hover-bg);
 }
 
-.agent-footer-status__button[aria-pressed="true"] {
-  border-color: #1e88e5;
-  background: #e7f1ff;
+.agent-footer-tools__button[aria-pressed="true"] {
+  border-color: var(--color-primary);
+  background: var(--color-primary-light);
 }
 
-.agent-footer-status__note-icon {
-  position: relative;
-  width: 0.875rem;
-  height: 0.875rem;
-  border: 1.5px solid currentColor;
-  border-radius: 0.125rem;
-  background: #fff3bf;
+.agent-footer-tools__button:disabled {
+  color: var(--text-secondary-color);
+  cursor: default;
+  opacity: 0.55;
 }
 
-.agent-footer-status__note-icon::after {
-  content: "";
-  position: absolute;
-  right: -1.5px;
-  bottom: -1.5px;
-  width: 0.35rem;
-  height: 0.35rem;
-  border-top: 1.5px solid currentColor;
-  border-left: 1.5px solid currentColor;
-  background: var(--island-bg-color);
+.agent-footer-tools__icon {
+  width: 1rem;
+  height: 1rem;
+  display: block;
+  color: currentColor;
 }
 
 .state-page {
