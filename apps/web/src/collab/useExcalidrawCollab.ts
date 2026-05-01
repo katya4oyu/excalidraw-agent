@@ -56,6 +56,7 @@ export function useExcalidrawCollab({ fileId, excalidrawElement }: UseExcalidraw
     scrollY: number;
     zoom: number;
   }>({ scrollX: 0, scrollY: 0, zoom: 1 });
+  const viewportStateRef = useRef({ scrollX: 0, scrollY: 0, zoom: 1 });
   const ydocRef = useRef<Y.Doc | null>(null);
   const requestedInstructionPromptsRef = useRef(new Map<string, string>());
   const noteWindowsRef = useRef(new Map<string, Window>());
@@ -364,11 +365,19 @@ export function useExcalidrawCollab({ fileId, excalidrawElement }: UseExcalidraw
   }, []);
 
   const onChange = useCallback((elements: readonly Record<string, unknown>[], appState: AppState) => {
-    setViewportState({
+    const nextViewportState = {
       scrollX: appState.scrollX,
       scrollY: appState.scrollY,
       zoom: appState.zoom.value,
-    });
+    };
+    if (
+      viewportStateRef.current.scrollX !== nextViewportState.scrollX ||
+      viewportStateRef.current.scrollY !== nextViewportState.scrollY ||
+      viewportStateRef.current.zoom !== nextViewportState.zoom
+    ) {
+      viewportStateRef.current = nextViewportState;
+      setViewportState(nextViewportState);
+    }
 
     if (isEditingText(appState) || !ydocRef.current) {
       return;

@@ -23,7 +23,8 @@ Please provide all answers in Japanese.
   - `mise run server:portless`
   - `mise run web:portless`
 - Prefer the portless URLs over raw localhost URLs:
-  - web: `https://excalidraw-agent.localhost`
-  - API: `https://api.excalidraw-agent.localhost`
+  - web: `http://excalidraw-agent.localhost:1355`
+  - API: `http://api.excalidraw-agent.localhost:1355`
 - Before starting another dev server, check for existing listeners and avoid multiple Vite/server instances for the same app. If an old instance is stale or conflicting, stop it instead of starting a new one.
+- If the Portless proxy is not running, start the HTTP proxy with `pnpm dlx portless proxy start --port 1355 --no-tls` before running the portless tasks.
 - Use raw `mise run web` / `mise run server` only for narrow debugging, and explain why portless is not being used.
