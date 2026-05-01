@@ -118,8 +118,14 @@ export class AgentSupervisor {
   private watch(worker: WorkerProcessState): void {
     let stderr = "";
 
+    worker.process.stdout?.on("data", (chunk: Buffer) => {
+      console.log(`[worker:${worker.fileId}] ${chunk.toString("utf8").trimEnd()}`);
+    });
+
     worker.process.stderr?.on("data", (chunk: Buffer) => {
-      stderr += chunk.toString("utf8");
+      const text = chunk.toString("utf8");
+      stderr += text;
+      console.error(`[worker:${worker.fileId}] ${text.trimEnd()}`);
     });
 
     worker.process.on("message", (message: AgentWorkerResponseMessage) => {

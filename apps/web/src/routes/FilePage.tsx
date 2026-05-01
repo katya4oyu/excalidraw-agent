@@ -6,7 +6,7 @@ import "@excalidraw/excalidraw/index.css";
 import { generateKeyBetween } from "fractional-indexing";
 import { getNoteEmbedMetadata } from "@excalidraw-agent/shared";
 import { startAgentRun } from "../api";
-import { useExcalidrawCollab } from "../collab/useExcalidrawCollab";
+import { useExcalidrawCollab, type AgentPresenceState } from "../collab/useExcalidrawCollab";
 import type { AgentFooterState } from "@excalidraw-agent/y-excalidraw-browser";
 import type { ExcalidrawImperativeAPI } from "@excalidraw/excalidraw/types";
 
@@ -30,6 +30,7 @@ export function FilePage() {
   const [runError, setRunError] = useState<string | null>(null);
   const {
     api,
+    agentPresence,
     agentFooterState,
     binding,
     isAgentInstructionMode,
@@ -38,6 +39,7 @@ export function FilePage() {
     setApi,
     status,
     toggleAgentInstructionMode,
+    viewportState,
   } = useExcalidrawCollab({
     fileId: id ?? "",
     excalidrawElement: shellRef.current,
@@ -111,6 +113,10 @@ export function FilePage() {
             }
           }}
         />
+        <AgentPresenceOverlay
+          presence={agentPresence}
+          viewport={viewportState}
+        />
         <Excalidraw
           excalidrawAPI={setApi}
           isCollaborating={Boolean(binding)}
@@ -151,6 +157,53 @@ export function FilePage() {
         </Excalidraw>
       </div>
     </main>
+  );
+}
+
+function AgentPresenceOverlay({
+  presence,
+  viewport,
+}: {
+  presence: AgentPresenceState | null;
+  viewport: {
+    scrollX: number;
+    scrollY: number;
+    zoom: number;
+  };
+}) {
+  if (!presence) {
+    return null;
+  }
+
+  const area = presence.plannedArea;
+  const left = (area.x + viewport.scrollX) * viewport.zoom;
+  const top = (area.y + viewport.scrollY) * viewport.zoom;
+  const width = area.width * viewport.zoom;
+  const height = area.height * viewport.zoom;
+  const logs = presence.logs.length > 0 ? presence.logs : [presence.message];
+
+  return (
+    <div
+      aria-hidden="true"
+      className={`agent-presence-overlay agent-presence-overlay--${presence.status}`}
+      style={{
+        left,
+        top,
+        width,
+        height,
+      }}
+    >
+      <div className="agent-presence-overlay__label">
+        <span className="agent-presence-overlay__dot" />
+        <span className="agent-presence-overlay__title">Agent</span>
+        <span className="agent-presence-overlay__message">{presence.message}</span>
+      </div>
+      <div className="agent-presence-overlay__logs">
+        {logs.slice(-3).map((log, index) => (
+          <span key={`${presence.runId}-${index}`}>{log}</span>
+        ))}
+      </div>
+    </div>
   );
 }
 

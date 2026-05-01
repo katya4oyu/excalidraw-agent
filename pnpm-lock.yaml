@@ -97,6 +97,9 @@ importers:
       '@excalidraw-agent/shared':
         specifier: workspace:*
         version: link:../../packages/shared
+      '@excalidraw-agent/y-excalidraw-agent':
+        specifier: workspace:*
+        version: link:../../packages/y-excalidraw-agent
       '@hocuspocus/provider':
         specifier: ^4.0.0
         version: 4.0.0(y-protocols@1.0.7(yjs@13.6.30))(yjs@13.6.30)

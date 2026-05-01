@@ -28,11 +28,34 @@ interface UseExcalidrawCollabOptions {
   excalidrawElement: HTMLElement | null;
 }
 
+export interface AgentPresenceState {
+  schemaVersion: 1;
+  fileId: string;
+  runId: string;
+  requestId: string;
+  status: "running" | "proposed" | "failed";
+  message: string;
+  logs: string[];
+  plannedArea: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  };
+  updatedAt: number;
+}
+
 export function useExcalidrawCollab({ fileId, excalidrawElement }: UseExcalidrawCollabOptions) {
   const [api, setApi] = useState<ExcalidrawImperativeAPI | null>(null);
   const [status, setStatus] = useState("connecting");
   const [binding, setBinding] = useState<ExcalidrawBinding | null>(null);
   const [isAgentInstructionMode, setIsAgentInstructionMode] = useState(false);
+  const [agentPresence, setAgentPresence] = useState<AgentPresenceState | null>(null);
+  const [viewportState, setViewportState] = useState<{
+    scrollX: number;
+    scrollY: number;
+    zoom: number;
+  }>({ scrollX: 0, scrollY: 0, zoom: 1 });
   const ydocRef = useRef<Y.Doc | null>(null);
   const requestedInstructionPromptsRef = useRef(new Map<string, string>());
   const noteWindowsRef = useRef(new Map<string, Window>());
@@ -103,8 +126,12 @@ export function useExcalidrawCollab({ fileId, excalidrawElement }: UseExcalidraw
     const handleStatus = ({ status: nextStatus }: { status: string }) => {
       setStatus(nextStatus);
     };
+    const handleAwarenessChange = () => {
+      setAgentPresence(readAgentPresence(awareness, fileId));
+    };
 
     provider.on("status", handleStatus);
+    awareness.on("change", handleAwarenessChange);
     const handleSynced = () => {
       const importedAppState = ydoc.getMap("appState").toJSON();
       if (Object.keys(importedAppState).length > 0) {
@@ -173,6 +200,7 @@ export function useExcalidrawCollab({ fileId, excalidrawElement }: UseExcalidraw
     return () => {
       setBinding(null);
       ydocRef.current = null;
+      setAgentPresence(null);
       requestedInstructionPromptsRef.current.clear();
       noteWindowsRef.current.clear();
       setAgentFooterState({
@@ -187,6 +215,7 @@ export function useExcalidrawCollab({ fileId, excalidrawElement }: UseExcalidraw
       destroyAgentFooterStateObserver();
       provider.off("status", handleStatus);
       provider.off("synced", handleSynced);
+      awareness.off("change", handleAwarenessChange);
       nextBinding.destroy();
       provider.destroy();
     };
@@ -335,6 +364,12 @@ export function useExcalidrawCollab({ fileId, excalidrawElement }: UseExcalidraw
   }, []);
 
   const onChange = useCallback((elements: readonly Record<string, unknown>[], appState: AppState) => {
+    setViewportState({
+      scrollX: appState.scrollX,
+      scrollY: appState.scrollY,
+      zoom: appState.zoom.value,
+    });
+
     if (isEditingText(appState) || !ydocRef.current) {
       return;
     }
@@ -424,6 +459,7 @@ export function useExcalidrawCollab({ fileId, excalidrawElement }: UseExcalidraw
   return {
     addAgentInstruction,
     api,
+    agentPresence,
     agentFooterState,
     binding,
     isAgentInstructionMode,
@@ -432,6 +468,7 @@ export function useExcalidrawCollab({ fileId, excalidrawElement }: UseExcalidraw
     setApi,
     status,
     toggleAgentInstructionMode,
+    viewportState,
   };
 }
 
@@ -688,6 +725,46 @@ function isNoteToParentMessage(value: unknown): value is NoteToParentMessage {
         typeof value.height === "number"
       )
     )
+  );
+}
+
+function readAgentPresence(awareness: NonNullable<HocuspocusProvider["awareness"]>, fileId: string): AgentPresenceState | null {
+  let latest: AgentPresenceState | null = null;
+  for (const state of awareness.getStates().values()) {
+    const presence = isRecord(state) ? state.agentPresence : null;
+    if (!isAgentPresenceState(presence) || presence.fileId !== fileId) {
+      continue;
+    }
+
+    if (!latest || presence.updatedAt > latest.updatedAt) {
+      latest = presence;
+    }
+  }
+
+  return latest;
+}
+
+function isAgentPresenceState(value: unknown): value is AgentPresenceState {
+  return (
+    isRecord(value) &&
+    value.schemaVersion === 1 &&
+    typeof value.fileId === "string" &&
+    typeof value.runId === "string" &&
+    typeof value.requestId === "string" &&
+    (
+      value.status === "running" ||
+      value.status === "proposed" ||
+      value.status === "failed"
+    ) &&
+    typeof value.message === "string" &&
+    Array.isArray(value.logs) &&
+    value.logs.every((log) => typeof log === "string") &&
+    isRecord(value.plannedArea) &&
+    typeof value.plannedArea.x === "number" &&
+    typeof value.plannedArea.y === "number" &&
+    typeof value.plannedArea.width === "number" &&
+    typeof value.plannedArea.height === "number" &&
+    typeof value.updatedAt === "number"
   );
 }
 
