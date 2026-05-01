@@ -160,6 +160,8 @@ Excalidraw Agent Canvas should feel like a lightweight shared sketching surface,
 
 The UI should be quiet, spatial, and tactile: floating islands, compact tool controls, soft borders, subtle shadows, purple selection accents, handwritten diagram content, and practical agent state indicators. The agent-specific UI must feel like it belongs to the canvas rather than like a separate app shell.
 
+![Excalidraw Agent design system moodboard](./docs/assets/excalidraw-design-system-moodboard.png)
+
 Existing Excalidraw components should be customized through Excalidraw's official CSS variable surface. Do not override internal DOM structure or brittle class names when a documented CSS variable can express the change. Custom application components around Excalidraw should use Tailwind-friendly tokens from this document.
 
 ## Colors
