@@ -1,13 +1,16 @@
 import { Codex } from "@openai/codex-sdk";
-import { cpSync, existsSync, mkdirSync, rmSync, symlinkSync } from "node:fs";
+import { HocuspocusProvider } from "@hocuspocus/provider";
+import { cpSync, existsSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
+import * as Y from "yjs";
 import type {
   AgentRunQueueRequest,
   AgentWorkerOptions,
   AgentWorkerRequestMessage,
   AgentWorkerResponseMessage,
 } from "@excalidraw-agent/shared";
+import { toDocumentName } from "@excalidraw-agent/shared";
 
 const defaultAgentModel = "gpt-5.3-codex-spark";
 
@@ -41,7 +44,9 @@ async function runDaemon(options: AgentWorkerOptions): Promise<void> {
   const workspace = prepareWorkspace(options);
   let running = false;
   const queue: AgentRunQueueRequest[] = [];
-  const codex = process.env.EXCALIDRAW_AGENT_PREPARE_ONLY === "true" ? null : createCodex(options);
+  const prepareOnly = process.env.EXCALIDRAW_AGENT_PREPARE_ONLY === "true";
+  const collab = prepareOnly ? null : await connectFileDocument(options);
+  const codex = prepareOnly ? null : createCodex(options);
   const thread = codex?.startThread({
     model: defaultAgentModel,
     workingDirectory: workspace,
@@ -52,6 +57,7 @@ async function runDaemon(options: AgentWorkerOptions): Promise<void> {
 
   process.on("message", (message: AgentWorkerRequestMessage) => {
     if (message.type === "shutdown") {
+      collab?.provider.destroy();
       process.exit(0);
     }
 
@@ -73,16 +79,44 @@ async function runDaemon(options: AgentWorkerOptions): Promise<void> {
 
     running = true;
     sendToParent({ type: "runStarted", fileId: options.fileId, runId: request.runId });
+    collab?.document.transact(() => {
+      writeRunStatus(collab.document, request.runId, {
+        status: "running",
+        requestId: request.requestId,
+        prompt: request.prompt,
+        updatedAt: Date.now(),
+      });
+    });
 
     try {
+      const snapshotPath = collab ? writeRunSnapshot(workspace, collab.document, request) : undefined;
       if (thread) {
-        const result = await thread.run(buildPrompt(options, request.prompt, request));
+        const result = await thread.run(buildPrompt(options, request.prompt, request, snapshotPath));
         if (result.finalResponse) {
           console.log(result.finalResponse);
         }
       }
+      collab?.document.transact(() => {
+        writeRunStatus(collab.document, request.runId, {
+          status: "proposed",
+          requestId: request.requestId,
+          prompt: request.prompt,
+          finishedAt: Date.now(),
+          updatedAt: Date.now(),
+        });
+      });
       sendToParent({ type: "runFinished", fileId: options.fileId, runId: request.runId, status: "proposed" });
     } catch (error) {
+      collab?.document.transact(() => {
+        writeRunStatus(collab.document, request.runId, {
+          status: "failed",
+          requestId: request.requestId,
+          prompt: request.prompt,
+          error: error instanceof Error ? error.message : String(error),
+          finishedAt: Date.now(),
+          updatedAt: Date.now(),
+        });
+      });
       sendToParent({
         type: "workerFailed",
         fileId: options.fileId,
@@ -94,6 +128,50 @@ async function runDaemon(options: AgentWorkerOptions): Promise<void> {
       void drain();
     }
   }
+}
+
+async function connectFileDocument(options: AgentWorkerOptions): Promise<{
+  document: Y.Doc;
+  provider: HocuspocusProvider;
+}> {
+  const document = new Y.Doc();
+  const provider = new HocuspocusProvider({
+    url: toCollabWebSocketUrl(options.serverUrl),
+    name: toDocumentName(options.fileId),
+    document,
+  });
+
+  await waitForProviderSync(provider);
+  return { document, provider };
+}
+
+function waitForProviderSync(provider: HocuspocusProvider): Promise<void> {
+  if (provider.isSynced) {
+    return Promise.resolve();
+  }
+
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      cleanup();
+      reject(new Error("Timed out waiting for worker Yjs sync"));
+    }, 10_000);
+    const handleSynced = () => {
+      cleanup();
+      resolve();
+    };
+    const handleClose = ({ event }: { event?: { reason?: string } }) => {
+      cleanup();
+      reject(new Error(`Worker Yjs connection closed${event?.reason ? `: ${event.reason}` : ""}`));
+    };
+    const cleanup = () => {
+      clearTimeout(timeout);
+      provider.off("synced", handleSynced);
+      provider.off("close", handleClose);
+    };
+
+    provider.on("synced", handleSynced);
+    provider.on("close", handleClose);
+  });
 }
 
 function createCodex(options: AgentWorkerOptions): Codex {
@@ -130,18 +208,59 @@ function buildPrompt(
   options: AgentWorkerOptions,
   prompt = options.prompt,
   request?: AgentRunQueueRequest,
+  snapshotPath?: string,
 ): string {
   return [
     `対象ファイルID: ${options.fileId}`,
     request ? `Agent run ID: ${request.runId}` : "",
     request ? `Instruction request ID: ${request.requestId}` : "",
+    snapshotPath ? `同期済みキャンバス snapshot: ${snapshotPath}` : "",
     "",
     "この作業スペースの AGENTS.md を読み、Excalidraw作業では .agents/skills/excalidraw-skill/SKILL.md を使ってください。",
     "MCP tools が使えない場合は、skill の REST API mode または付属 scripts を使ってください。",
     ".excalidraw ファイルはこの作業スペース内に作成してください。",
+    snapshotPath ? "作業開始時には必ず snapshot JSON を読み、現在の canvas 要素・notes・agentRuns を確認してください。" : "",
     "",
     prompt ?? "現在はセットアップ確認として、利用できる作業手順を短く確認してください。",
   ].filter((line, index) => line || index > 2).join("\n");
+}
+
+function writeRunSnapshot(workspace: string, document: Y.Doc, request: AgentRunQueueRequest): string {
+  const runsDirectory = join(workspace, "runs", request.runId);
+  mkdirSync(runsDirectory, { recursive: true });
+
+  const snapshotPath = join(runsDirectory, "base-scene.json");
+  writeFileSync(
+    snapshotPath,
+    JSON.stringify({
+      fileId: request.fileId,
+      requestId: request.requestId,
+      runId: request.runId,
+      prompt: request.prompt,
+      capturedAt: new Date().toISOString(),
+      elements: document.getArray<Y.Map<unknown>>("elements").toArray().map((item) => item.get("el")),
+      assets: document.getMap("assets").toJSON(),
+      notes: document.getMap("notes").toJSON(),
+      agentRuns: document.getMap("agentRuns").toJSON(),
+      agentProposals: document.getMap("agentProposals").toJSON(),
+    }, null, 2),
+  );
+  return snapshotPath;
+}
+
+function writeRunStatus(document: Y.Doc, runId: string, patch: Record<string, unknown>): void {
+  const agentRuns = document.getMap<Record<string, unknown>>("agentRuns");
+  const current = agentRuns.get(runId);
+  agentRuns.set(runId, {
+    ...(isRecord(current) ? current : {}),
+    ...patch,
+  });
+}
+
+function toCollabWebSocketUrl(serverUrl: string): string {
+  const url = new URL("/collab", serverUrl);
+  url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+  return url.toString();
 }
 
 function prepareWorkspace(options: AgentWorkerOptions): string {
@@ -172,4 +291,8 @@ function sendToParent(message: AgentWorkerResponseMessage): void {
   if (process.send) {
     process.send(message);
   }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

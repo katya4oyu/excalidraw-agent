@@ -102,24 +102,31 @@ app.post("/api/files/:id/agent-runs", async (c) => {
   }
 
   agents.ensureWorker(file.id);
-  const runId = `agent-run-${crypto.randomUUID()}`;
   const requestId = `api-run-${crypto.randomUUID()}`;
-  storeApiAgentRunRequest(file.documentName, {
-    prompt,
-    requestId,
-    runId,
+  const connection = await hocuspocus.openDirectConnection(file.documentName, {
+    source: "api",
   });
-  const started = agents.enqueueRun(file.id, {
-    fileId: file.id,
-    prompt,
-    requestId,
-    runId,
-  });
+
+  try {
+    await connection.transact((document) => {
+      const now = Date.now();
+      document.getMap<Record<string, unknown>>("agentInstructionRequests").set(requestId, {
+        status: "queued",
+        source: "api",
+        prompt,
+        createdAt: now,
+        updatedAt: now,
+      });
+    });
+  } finally {
+    await connection.disconnect();
+  }
+
   return c.json({
     fileId: file.id,
-    started,
-    agentStatus: "running",
-  }, started ? 201 : 202);
+    requestId,
+    agentStatus: "queued",
+  }, 202);
 });
 
 app.get("/api/files/:id", (c) => {
@@ -211,38 +218,6 @@ function storeExcalidrawDocument(documentName: `file:${string}`, document: Excal
       yAppState.set(key, value);
     }
   }
-
-  db.storeDocument(documentName, Y.encodeStateAsUpdate(ydoc));
-}
-
-function storeApiAgentRunRequest(
-  documentName: `file:${string}`,
-  request: { prompt: string; requestId: string; runId: string },
-): void {
-  const ydoc = new Y.Doc();
-  const persisted = db.loadDocument(documentName);
-  if (persisted) {
-    Y.applyUpdate(ydoc, persisted);
-  }
-
-  const now = Date.now();
-  ydoc.transact(() => {
-    ydoc.getMap<Record<string, unknown>>("agentInstructionRequests").set(request.requestId, {
-      status: "running",
-      source: "api",
-      prompt: request.prompt,
-      runId: request.runId,
-      createdAt: now,
-      updatedAt: now,
-    });
-    ydoc.getMap<Record<string, unknown>>("agentRuns").set(request.runId, {
-      status: "running",
-      source: "api",
-      prompt: request.prompt,
-      createdAt: now,
-      updatedAt: now,
-    });
-  });
 
   db.storeDocument(documentName, Y.encodeStateAsUpdate(ydoc));
 }

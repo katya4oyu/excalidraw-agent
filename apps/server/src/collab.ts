@@ -90,22 +90,24 @@ export const startAgentFromInstructionRequests = (
   }
 
   for (const [requestId, request] of requests.entries()) {
-    if (!isQueuedInstructionRequest(request)) {
+    if (!isQueuedAgentRequest(request)) {
       continue;
     }
 
-    const currentPrompt = getCurrentInstructionPrompt(request, {
-      elementsById,
-      legacyInstructionNotes,
-      notes,
-    });
-    if (currentPrompt !== request.prompt) {
-      requests.set(requestId, {
-        ...request,
-        status: "stale",
-        updatedAt: Date.now(),
+    if (request.source === "instruction-note") {
+      const currentPrompt = getCurrentInstructionPrompt(request, {
+        elementsById,
+        legacyInstructionNotes,
+        notes,
       });
-      continue;
+      if (currentPrompt !== request.prompt) {
+        requests.set(requestId, {
+          ...request,
+          status: "stale",
+          updatedAt: Date.now(),
+        });
+        continue;
+      }
     }
 
     const now = Date.now();
@@ -120,25 +122,26 @@ export const startAgentFromInstructionRequests = (
       return;
     }
 
+    const instructionRequest = request.source === "instruction-note" ? request : null;
     document.transact(() => {
       requests.set(requestId, {
         status: "running",
-        source: "instruction-note",
+        source: request.source,
         prompt: request.prompt,
         runId,
-        ...(request.elementId ? { elementId: request.elementId } : {}),
-        ...(request.noteId ? { noteId: request.noteId } : {}),
-        ...(request.sourceNoteId ? { sourceNoteId: request.sourceNoteId } : {}),
+        ...(instructionRequest?.elementId ? { elementId: instructionRequest.elementId } : {}),
+        ...(instructionRequest?.noteId ? { noteId: instructionRequest.noteId } : {}),
+        ...(instructionRequest?.sourceNoteId ? { sourceNoteId: instructionRequest.sourceNoteId } : {}),
         createdAt: request.createdAt,
         updatedAt: now,
       });
       agentRuns.set(runId, {
         status: "running",
-        source: "instruction-note",
+        source: request.source,
         prompt: request.prompt,
-        ...(request.elementId ? { instructionElementIds: [request.elementId] } : {}),
-        ...(request.noteId ? { sourceNoteId: request.noteId } : {}),
-        ...(request.sourceNoteId ? { sourceNoteId: request.sourceNoteId } : {}),
+        ...(instructionRequest?.elementId ? { instructionElementIds: [instructionRequest.elementId] } : {}),
+        ...(instructionRequest?.noteId ? { sourceNoteId: instructionRequest.noteId } : {}),
+        ...(instructionRequest?.sourceNoteId ? { sourceNoteId: instructionRequest.sourceNoteId } : {}),
         createdAt: now,
         updatedAt: now,
       });
@@ -181,13 +184,26 @@ type QueuedInstructionRequest = {
   status: "queued";
 };
 
-const isQueuedInstructionRequest = (value: unknown): value is QueuedInstructionRequest => {
+type QueuedApiRequest = {
+  createdAt: number;
+  prompt: string;
+  source: "api";
+  status: "queued";
+};
+
+type QueuedAgentRequest = QueuedInstructionRequest | QueuedApiRequest;
+
+const isQueuedAgentRequest = (value: unknown): value is QueuedAgentRequest => {
+  if (!isRecord(value) || value.status !== "queued" || typeof value.prompt !== "string" || !value.prompt.trim()) {
+    return false;
+  }
+
+  if (value.source === "api") {
+    return typeof value.createdAt === "number";
+  }
+
   return (
-    isRecord(value) &&
-    value.status === "queued" &&
     value.source === "instruction-note" &&
-    typeof value.prompt === "string" &&
-    value.prompt.trim().length > 0 &&
     (
       typeof value.elementId === "string" ||
       typeof value.noteId === "string" ||

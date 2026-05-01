@@ -1,6 +1,5 @@
 import {
   fileIdFromDocumentName,
-  toDocumentName,
   type AgentRunQueueRequest,
   type AgentStatus,
   type AgentWorkerRequestMessage,
@@ -8,7 +7,6 @@ import {
   type FileId,
 } from "@excalidraw-agent/shared";
 import { fork, type ChildProcess } from "node:child_process";
-import * as Y from "yjs";
 
 export interface WorkerHandle {
   fileId: FileId;
@@ -24,8 +22,6 @@ interface WorkerProcessState extends WorkerHandle {
 }
 
 interface AgentSupervisorDatabase {
-  loadDocument(documentName: ReturnType<typeof toDocumentName>): Uint8Array | null;
-  storeDocument(documentName: ReturnType<typeof toDocumentName>, state: Uint8Array): void;
   updateAgentStatus(id: FileId, status: AgentStatus): void;
 }
 
@@ -155,18 +151,11 @@ export class AgentSupervisor {
     if (message.type === "runStarted") {
       worker.busy = true;
       worker.activeRunId = message.runId;
-      this.updatePersistedRun(worker.fileId, message.runId, "running");
       this.db.updateAgentStatus(worker.fileId, "running");
       return;
     }
 
     if (message.type === "runFinished" || message.type === "workerFailed") {
-      this.updatePersistedRun(
-        worker.fileId,
-        message.runId,
-        message.type === "workerFailed" ? "failed" : message.status,
-        message.type === "workerFailed" ? message.error : undefined,
-      );
       worker.busy = false;
       worker.activeRunId = undefined;
       this.db.updateAgentStatus(worker.fileId, message.type === "workerFailed" ? "failed" : "verified");
@@ -195,31 +184,6 @@ export class AgentSupervisor {
       worker.process.send(message);
     }
   }
-
-  private updatePersistedRun(fileId: FileId, runId: string | undefined, status: string, error?: string): void {
-    if (!runId) {
-      return;
-    }
-
-    const documentName = toDocumentName(fileId);
-    const ydoc = new Y.Doc();
-    const persisted = this.db.loadDocument(documentName);
-    if (persisted) {
-      Y.applyUpdate(ydoc, persisted);
-    }
-
-    const now = Date.now();
-    const agentRuns = ydoc.getMap<Record<string, unknown>>("agentRuns");
-    const current = agentRuns.get(runId);
-    agentRuns.set(runId, {
-      ...(isRecord(current) ? current : {}),
-      status,
-      error,
-      finishedAt: status === "running" ? undefined : now,
-      updatedAt: now,
-    });
-    this.db.storeDocument(documentName, Y.encodeStateAsUpdate(ydoc));
-  }
 }
 
 const toWorkerHandle = (worker: WorkerProcessState): WorkerHandle => ({
@@ -227,7 +191,3 @@ const toWorkerHandle = (worker: WorkerProcessState): WorkerHandle => ({
   fileId: worker.fileId,
   ready: worker.ready,
 });
-
-const isRecord = (value: unknown): value is Record<string, unknown> => {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-};

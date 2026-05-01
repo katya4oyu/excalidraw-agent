@@ -75,6 +75,27 @@ describe("agent instruction request trigger", () => {
     assert.equal(runs[0]?.sourceNoteId, "note-1");
   });
 
+  test("starts an agent from a queued api request without note text validation", () => {
+    const ydoc = new Y.Doc();
+    ydoc.getMap("agentInstructionRequests").set("request-1", {
+      status: "queued",
+      source: "api",
+      prompt: "キャンバス全体を確認して",
+      createdAt: 1,
+      updatedAt: 1,
+    });
+    const agents = new FakeAgentStarter();
+
+    startAgentFromInstructionRequests(ydoc, "file-1", agents);
+
+    const runs = Object.values(ydoc.getMap<Record<string, unknown>>("agentRuns").toJSON());
+    assert.equal(agents.enqueues.length, 1);
+    assert.equal(agents.enqueues[0]?.requestId, "request-1");
+    assert.equal(getRequestStatus(ydoc, "request-1"), "running");
+    assert.equal(runs.length, 1);
+    assert.equal(runs[0]?.source, "api");
+  });
+
   test("marks queued requests stale when the note text changed before the server sees it", () => {
     const ydoc = createInstructionDocument("現在の本文");
     const textId = getTextInstructionId(ydoc);
