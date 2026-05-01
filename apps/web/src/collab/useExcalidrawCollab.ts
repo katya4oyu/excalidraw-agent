@@ -1,11 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { HocuspocusProvider } from "@hocuspocus/provider";
 import {
-  agentInstructionPlaceholderText,
-  createAgentInstructionNoteElements,
+  createNoteEmbedElement,
+  createNoteRecord,
   getAgentInstructionPrompt,
+  getNoteEmbedMetadata,
   insertExcalidrawElements,
   toDocumentName,
+  type NoteRecord,
+  type NoteToParentMessage,
+  type ParentToNoteMessage,
 } from "@excalidraw-agent/shared";
 import {
   createAgentFooterStateObserver,
@@ -31,6 +35,7 @@ export function useExcalidrawCollab({ fileId, excalidrawElement }: UseExcalidraw
   const [isAgentInstructionMode, setIsAgentInstructionMode] = useState(false);
   const ydocRef = useRef<Y.Doc | null>(null);
   const requestedInstructionPromptsRef = useRef(new Map<string, string>());
+  const noteWindowsRef = useRef(new Map<string, Window>());
   const [agentFooterState, setAgentFooterState] = useState<AgentFooterState>({
     runStatus: "idle",
     activeRunCount: 0,
@@ -76,6 +81,7 @@ export function useExcalidrawCollab({ fileId, excalidrawElement }: UseExcalidraw
     const yAssets = ydoc.getMap("assets");
     const yAgentRuns = ydoc.getMap("agentRuns");
     const yAgentProposals = ydoc.getMap("agentProposals");
+    const yNotes = ydoc.getMap<Record<string, unknown>>("notes");
     const localOrigin = {};
     const undoManagerOptions = excalidrawElement.querySelector(".undo-redo-buttons")
       ? {
@@ -117,17 +123,67 @@ export function useExcalidrawCollab({ fileId, excalidrawElement }: UseExcalidraw
       },
       setAgentFooterState,
     );
+    const sendNoteState = (noteId: string, target: Window) => {
+      const note = readNoteState(ydoc, fileId, noteId);
+      if (!note) {
+        return;
+      }
+
+      target.postMessage(
+        {
+          type: "excalidraw-agent:noteState",
+          fileId,
+          note,
+        } satisfies ParentToNoteMessage,
+        window.location.origin,
+      );
+    };
+    const sendAllNoteStates = () => {
+      for (const [noteId, target] of noteWindowsRef.current.entries()) {
+        sendNoteState(noteId, target);
+      }
+    };
+    const handleNoteMessage = (event: MessageEvent<unknown>) => {
+      if (event.origin !== window.location.origin || !isNoteToParentMessage(event.data)) {
+        return;
+      }
+
+      if (event.data.fileId !== fileId || !(event.source instanceof Window)) {
+        return;
+      }
+
+      noteWindowsRef.current.set(event.data.noteId, event.source);
+      if (event.data.type === "excalidraw-agent:noteReady") {
+        sendNoteState(event.data.noteId, event.source);
+        return;
+      }
+
+      if (event.data.type === "excalidraw-agent:noteTextChanged") {
+        updateNoteText(ydoc, fileId, event.data.noteId, event.data.text);
+        sendNoteState(event.data.noteId, event.source);
+      }
+    };
+    const observeNoteState = () => {
+      sendAllNoteStates();
+    };
+    window.addEventListener("message", handleNoteMessage);
+    yNotes.observe(observeNoteState);
+    yAgentRuns.observe(observeNoteState);
 
     return () => {
       setBinding(null);
       ydocRef.current = null;
       requestedInstructionPromptsRef.current.clear();
+      noteWindowsRef.current.clear();
       setAgentFooterState({
         runStatus: "idle",
         activeRunCount: 0,
         proposedCount: 0,
         ghostElementCount: 0,
       });
+      yNotes.unobserve(observeNoteState);
+      yAgentRuns.unobserve(observeNoteState);
+      window.removeEventListener("message", handleNoteMessage);
       destroyAgentFooterStateObserver();
       provider.off("status", handleStatus);
       provider.off("synced", handleSynced);
@@ -151,20 +207,67 @@ export function useExcalidrawCollab({ fileId, excalidrawElement }: UseExcalidraw
     api.resetCursor();
   }, [api, isAgentInstructionMode]);
 
+  useEffect(() => {
+    if (!api || !excalidrawElement) {
+      return;
+    }
+
+    let wheelPanTimer = 0;
+    const clearWheelPanMode = () => {
+      excalidrawElement.classList.remove("note-wheel-pan-active");
+      wheelPanTimer = 0;
+    };
+    const handleWheel = (event: WheelEvent) => {
+      if (isEventInsideNoteIframe(event)) {
+        return;
+      }
+
+      if (!hasActiveOrSelectedNote(api)) {
+        return;
+      }
+
+      window.clearTimeout(wheelPanTimer);
+      excalidrawElement.classList.add("note-wheel-pan-active");
+      wheelPanTimer = window.setTimeout(clearWheelPanMode, 180);
+    };
+
+    excalidrawElement.addEventListener("wheel", handleWheel, { capture: true });
+
+    return () => {
+      window.clearTimeout(wheelPanTimer);
+      clearWheelPanMode();
+      excalidrawElement.removeEventListener("wheel", handleWheel, { capture: true });
+    };
+  }, [api, excalidrawElement]);
+
   const insertAgentInstructionAt = useCallback((x: number, y: number) => {
     if (!ydocRef.current) {
       return;
     }
 
+    const noteId = `note-${crypto.randomUUID()}`;
+    const width = 420;
+    const height = 220;
+    const link = createNoteEmbedLink(fileId, noteId);
+    ydocRef.current.getMap<Record<string, unknown>>("notes").set(
+      noteId,
+      toRecord(createNoteRecord(fileId, noteId)),
+    );
     insertExcalidrawElements(
       ydocRef.current,
-      createAgentInstructionNoteElements({
-        x,
-        y,
-        text: agentInstructionPlaceholderText,
-      }),
+      [
+        createNoteEmbedElement({
+          fileId,
+          height,
+          link,
+          noteId,
+          width,
+          x,
+          y,
+        }),
+      ],
     );
-  }, []);
+  }, [fileId]);
 
   const insertAgentInstructionBox = useCallback((input: {
     height?: number;
@@ -176,14 +279,29 @@ export function useExcalidrawCollab({ fileId, excalidrawElement }: UseExcalidraw
       return;
     }
 
+    const noteId = `note-${crypto.randomUUID()}`;
+    const width = Math.max(280, input.width ?? 420);
+    const height = Math.max(160, input.height ?? 220);
+    const link = createNoteEmbedLink(fileId, noteId);
+    ydocRef.current.getMap<Record<string, unknown>>("notes").set(
+      noteId,
+      toRecord(createNoteRecord(fileId, noteId)),
+    );
     insertExcalidrawElements(
       ydocRef.current,
-      createAgentInstructionNoteElements({
-        ...input,
-        text: agentInstructionPlaceholderText,
-      }),
+      [
+        createNoteEmbedElement({
+          fileId,
+          height,
+          link,
+          noteId,
+          width,
+          x: input.x,
+          y: input.y,
+        }),
+      ],
     );
-  }, []);
+  }, [fileId]);
 
   const addAgentInstruction = useCallback(() => {
     if (!api) {
@@ -193,7 +311,7 @@ export function useExcalidrawCollab({ fileId, excalidrawElement }: UseExcalidraw
     const appState = api.getAppState();
     const zoom = appState.zoom.value;
     const elementWidth = 420;
-    const elementHeight = 120;
+    const elementHeight = 220;
     const viewportLeft = -appState.scrollX;
     const viewportTop = -appState.scrollY;
     const viewportWidth = appState.width / zoom;
@@ -221,6 +339,8 @@ export function useExcalidrawCollab({ fileId, excalidrawElement }: UseExcalidraw
       return;
     }
 
+    restoreManagedNoteLinks(ydocRef.current, fileId, elements);
+
     const requests = ydocRef.current.getMap<Record<string, unknown>>("agentInstructionRequests");
     for (const element of elements) {
       const prompt = getAgentInstructionPrompt(element);
@@ -247,19 +367,45 @@ export function useExcalidrawCollab({ fileId, excalidrawElement }: UseExcalidraw
       });
       requestedInstructionPromptsRef.current.set(elementId, prompt);
     }
-  }, []);
+  }, [fileId]);
 
   const onPointerUp = useCallback((
     _activeTool: AppState["activeTool"],
     pointerDownState: PointerDownState,
   ) => {
-    if (!isAgentInstructionMode) {
-      return;
-    }
-
     const deltaX = pointerDownState.lastCoords.x - pointerDownState.origin.x;
     const deltaY = pointerDownState.lastCoords.y - pointerDownState.origin.y;
     const hasDragged = Math.abs(deltaX) >= 8 || Math.abs(deltaY) >= 8;
+
+    if (!isAgentInstructionMode) {
+      if (!api || hasDragged) {
+        return;
+      }
+
+      const note = findNoteElementAt(api.getSceneElements(), pointerDownState.lastCoords.x, pointerDownState.lastCoords.y);
+      if (!note) {
+        return;
+      }
+
+      api.updateScene({
+        appState: {
+          activeEmbeddable: {
+            element: note as AppState["activeEmbeddable"] extends { element: infer Element } ? Element : never,
+            state: "active",
+          },
+          selectedElementIds: {
+            [note.id]: true,
+          },
+        },
+      });
+      window.setTimeout(() => {
+        focusNoteTextarea(note);
+      }, 0);
+      window.setTimeout(() => {
+        focusNoteTextarea(note);
+      }, 60);
+      return;
+    }
 
     if (hasDragged) {
       insertAgentInstructionBox({
@@ -269,11 +415,11 @@ export function useExcalidrawCollab({ fileId, excalidrawElement }: UseExcalidraw
         height: Math.max(96, Math.abs(deltaY)),
       });
     } else {
-      insertAgentInstructionAt(pointerDownState.origin.x, pointerDownState.origin.y);
+      insertAgentInstructionAt(pointerDownState.origin.x - 210, pointerDownState.origin.y - 110);
     }
 
     setIsAgentInstructionMode(false);
-  }, [insertAgentInstructionAt, insertAgentInstructionBox, isAgentInstructionMode]);
+  }, [api, insertAgentInstructionAt, insertAgentInstructionBox, isAgentInstructionMode]);
 
   return {
     addAgentInstruction,
@@ -301,6 +447,254 @@ function getElementId(element: Record<string, unknown>): string {
   return typeof element.id === "string" ? element.id : "";
 }
 
+function isEventInsideNoteIframe(event: Event): boolean {
+  return event
+    .composedPath()
+    .some((target) => target instanceof HTMLIFrameElement && isNoteIframe(target));
+}
+
+function isNoteIframe(iframe: HTMLIFrameElement): boolean {
+  try {
+    const src = new URL(iframe.src);
+    return src.origin === window.location.origin && (src.pathname === "/note" || src.pathname === "/note.html");
+  } catch {
+    return false;
+  }
+}
+
+function hasActiveOrSelectedNote(api: ExcalidrawImperativeAPI): boolean {
+  const appState = api.getAppState();
+  const activeElement = appState.activeEmbeddable?.element;
+  if (activeElement && getNoteEmbedMetadata(activeElement as Record<string, unknown>)) {
+    return true;
+  }
+
+  const selectedElementIds = appState.selectedElementIds;
+  if (Object.keys(selectedElementIds).length === 0) {
+    return false;
+  }
+
+  return api
+    .getSceneElements()
+    .some((element) => selectedElementIds[element.id] && getNoteEmbedMetadata(element as Record<string, unknown>));
+}
+
+function findNoteElementAt(
+  elements: readonly Record<string, unknown>[],
+  x: number,
+  y: number,
+): (Record<string, unknown> & { id: string }) | null {
+  for (let index = elements.length - 1; index >= 0; index -= 1) {
+    const element = elements[index];
+    const metadata = getNoteEmbedMetadata(element);
+    if (
+      !metadata ||
+      !isElementVisible(element) ||
+      typeof element.id !== "string" ||
+      typeof element.x !== "number" ||
+      typeof element.y !== "number" ||
+      typeof element.width !== "number" ||
+      typeof element.height !== "number"
+    ) {
+      continue;
+    }
+
+    if (
+      x >= element.x &&
+      x <= element.x + element.width &&
+      y >= element.y &&
+      y <= element.y + element.height
+    ) {
+      return element as Record<string, unknown> & { id: string };
+    }
+  }
+
+  return null;
+}
+
+function focusNoteTextarea(element: Record<string, unknown>): void {
+  const metadata = getNoteEmbedMetadata(element);
+  if (!metadata) {
+    return;
+  }
+
+  const iframe = document.querySelector<HTMLIFrameElement>(
+    `iframe.excalidraw__embeddable[src*="noteId=${metadata.noteId}"]`,
+  );
+  const textarea = iframe?.contentWindow?.document.querySelector<HTMLTextAreaElement>("textarea");
+  textarea?.focus();
+}
+
+function isElementVisible(element: Record<string, unknown>): boolean {
+  return element.isDeleted !== true && element.type === "embeddable";
+}
+
+function createNoteEmbedLink(fileId: string, noteId: string): string {
+  const url = new URL("/note", window.location.origin);
+  url.searchParams.set("fileId", fileId);
+  url.searchParams.set("noteId", noteId);
+  return url.toString();
+}
+
+function restoreManagedNoteLinks(
+  ydoc: Y.Doc,
+  fileId: string,
+  elements: readonly Record<string, unknown>[],
+): void {
+  const changedNoteLinks = new Map<string, string>();
+  for (const element of elements) {
+    const metadata = getNoteEmbedMetadata(element);
+    if (!metadata || metadata.fileId !== fileId || typeof element.id !== "string") {
+      continue;
+    }
+
+    const expectedLink = createNoteEmbedLink(metadata.fileId, metadata.noteId);
+    if (element.link !== expectedLink) {
+      changedNoteLinks.set(element.id, expectedLink);
+    }
+  }
+
+  if (changedNoteLinks.size === 0) {
+    return;
+  }
+
+  for (const item of ydoc.getArray<Y.Map<unknown>>("elements").toArray()) {
+    const element = item.get("el");
+    if (!isRecord(element) || typeof element.id !== "string") {
+      continue;
+    }
+
+    const expectedLink = changedNoteLinks.get(element.id);
+    if (expectedLink) {
+      item.set("el", {
+        ...element,
+        link: expectedLink,
+      });
+    }
+  }
+}
+
+function readNoteState(ydoc: Y.Doc, fileId: string, noteId: string): NoteRecord | null {
+  const note = ydoc.getMap<Record<string, unknown>>("notes").get(noteId);
+  if (!isNoteRecord(note)) {
+    return null;
+  }
+
+  const request = typeof note.requestId === "string"
+    ? ydoc.getMap<Record<string, unknown>>("agentInstructionRequests").get(note.requestId) ?? null
+    : null;
+  const runId = typeof note.runId === "string"
+    ? note.runId
+    : isRecord(request) && typeof request.runId === "string"
+      ? request.runId
+      : undefined;
+  const run = runId ? ydoc.getMap<Record<string, unknown>>("agentRuns").get(runId) ?? null : null;
+
+  return {
+    ...note,
+    fileId,
+    noteId,
+    runId,
+    status: readNoteStatus(note, request, run),
+  };
+}
+
+function updateNoteText(ydoc: Y.Doc, fileId: string, noteId: string, text: string): void {
+  const notes = ydoc.getMap<Record<string, unknown>>("notes");
+  const current = notes.get(noteId);
+  const now = Date.now();
+  notes.set(noteId, {
+    ...(isRecord(current) ? current : createNoteRecord(fileId, noteId, now)),
+    schemaVersion: 1,
+    fileId,
+    noteId,
+    text,
+    status: readEditableNoteStatus(current),
+    updatedAt: now,
+  });
+}
+
+function readNoteStatus(
+  note: NoteRecord,
+  request: Record<string, unknown> | null,
+  run: Record<string, unknown> | null,
+): NoteRecord["status"] {
+  if (isRecord(run) && isNoteStatus(run.status)) {
+    return run.status;
+  }
+
+  if (isRecord(request) && isNoteStatus(request.status)) {
+    return request.status;
+  }
+
+  if (isRecord(request) && request.status === "stale") {
+    return "idle";
+  }
+
+  return note.status;
+}
+
+function readEditableNoteStatus(current: unknown): NoteRecord["status"] {
+  if (!isRecord(current)) {
+    return "idle";
+  }
+
+  const status = current.status;
+  if (status === "queued" || status === "running") {
+    return status;
+  }
+
+  return "idle";
+}
+
+function isNoteRecord(value: unknown): value is NoteRecord {
+  return (
+    isRecord(value) &&
+    value.schemaVersion === 1 &&
+    typeof value.fileId === "string" &&
+    typeof value.noteId === "string" &&
+    typeof value.text === "string" &&
+    isNoteStatus(value.status) &&
+    typeof value.createdAt === "number" &&
+    typeof value.updatedAt === "number"
+  );
+}
+
+function isNoteStatus(value: unknown): value is NoteRecord["status"] {
+  return (
+    value === "idle" ||
+    value === "queued" ||
+    value === "running" ||
+    value === "proposed" ||
+    value === "conflicted" ||
+    value === "failed"
+  );
+}
+
+function isNoteToParentMessage(value: unknown): value is NoteToParentMessage {
+  return (
+    isRecord(value) &&
+    typeof value.fileId === "string" &&
+    typeof value.noteId === "string" &&
+    (
+      value.type === "excalidraw-agent:noteReady" ||
+      (
+        value.type === "excalidraw-agent:noteTextChanged" &&
+        typeof value.text === "string"
+      ) ||
+      (
+        value.type === "excalidraw-agent:noteResizeRequested" &&
+        typeof value.width === "number" &&
+        typeof value.height === "number"
+      )
+    )
+  );
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function toRecord(value: NoteRecord): Record<string, unknown> {
+  return { ...value };
 }

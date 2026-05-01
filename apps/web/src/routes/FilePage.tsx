@@ -2,6 +2,7 @@ import { useRef } from "react";
 import { useParams } from "react-router";
 import { Excalidraw, Footer, WelcomeScreen } from "@excalidraw/excalidraw";
 import "@excalidraw/excalidraw/index.css";
+import { getNoteEmbedMetadata } from "@excalidraw-agent/shared";
 import { useExcalidrawCollab } from "../collab/useExcalidrawCollab";
 import type { AgentFooterState } from "@excalidraw-agent/y-excalidraw-browser";
 
@@ -33,8 +34,11 @@ export function FilePage() {
           excalidrawAPI={setApi}
           isCollaborating={Boolean(binding)}
           onChange={onChange}
+          onLinkOpen={handleNoteLinkOpen}
           onPointerUp={onPointerUp}
           onPointerUpdate={binding?.onPointerUpdate}
+          renderEmbeddable={renderNoteEmbeddable}
+          validateEmbeddable={validateNoteEmbeddable}
         >
           <WelcomeScreen />
           <Footer>
@@ -49,6 +53,43 @@ export function FilePage() {
       </div>
     </main>
   );
+}
+
+function renderNoteEmbeddable(element: Record<string, unknown>) {
+  if (!getNoteEmbedMetadata(element) || typeof element.link !== "string" || !validateNoteEmbeddable(element.link)) {
+    return null;
+  }
+
+  return (
+    <iframe
+      allow="clipboard-write"
+      allowFullScreen
+      className="excalidraw__embeddable"
+      referrerPolicy="no-referrer-when-downgrade"
+      sandbox="allow-same-origin allow-scripts allow-forms"
+      scrolling="no"
+      src={element.link}
+      title="Note"
+    />
+  );
+}
+
+function handleNoteLinkOpen(
+  element: Record<string, unknown>,
+  event: CustomEvent<{ nativeEvent: MouseEvent | React.PointerEvent<HTMLCanvasElement> }>,
+): void {
+  if (getNoteEmbedMetadata(element)) {
+    event.preventDefault();
+  }
+}
+
+function validateNoteEmbeddable(link: string): boolean {
+  try {
+    const url = new URL(link);
+    return url.origin === window.location.origin && (url.pathname === "/note" || url.pathname === "/note.html");
+  } catch {
+    return false;
+  }
 }
 
 function AgentFooterStatus({
@@ -73,10 +114,10 @@ function AgentFooterStatus({
       ) : null}
       <span className="agent-footer-status__meta">{collabStatus}</span>
       <button
-        aria-label={isInstructionMode ? "Cancel agent note placement" : "Place agent note"}
+        aria-label={isInstructionMode ? "Cancel note placement" : "Place note"}
         aria-pressed={isInstructionMode}
         className="agent-footer-status__button"
-        title={isInstructionMode ? "Cancel agent note placement" : "Place agent note"}
+        title={isInstructionMode ? "Cancel note placement" : "Place note"}
         type="button"
         onClick={onToggleInstructionMode}
       >

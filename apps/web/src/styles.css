@@ -2,6 +2,13 @@
   box-sizing: border-box;
 }
 
+@font-face {
+  font-family: "Virgil";
+  font-style: normal;
+  font-weight: 400;
+  src: url("../node_modules/@excalidraw/excalidraw/dist/prod/fonts/Virgil/Virgil-Regular.woff2") format("woff2");
+}
+
 html,
 body {
   margin: 0;
@@ -15,8 +22,33 @@ body {
   height: 100%;
 }
 
+#sticky-note-root {
+  width: 100%;
+  height: 100%;
+}
+
+#note-root {
+  width: 100%;
+  height: 100%;
+}
+
 body {
   min-height: 100vh;
+}
+
+.sticky-note-body {
+  overflow: hidden;
+  background: transparent;
+}
+
+.sticky-note-body--standalone {
+  background: #f8f7f2;
+}
+
+.sticky-note-body--standalone #sticky-note-root {
+  display: grid;
+  place-items: center;
+  padding: 2rem;
 }
 
 .error-text {
@@ -32,6 +64,23 @@ body {
 .excalidraw-host {
   width: 100%;
   height: 100%;
+}
+
+.excalidraw .excalidraw-hyperlinkContainer:has(.excalidraw-hyperlinkContainer-link[href*="/note?"]),
+.excalidraw .excalidraw-hyperlinkContainer:has(.excalidraw-hyperlinkContainer-link[href*="/note.html?"]) {
+  display: none !important;
+  pointer-events: none;
+}
+
+.excalidraw-host.note-wheel-pan-active .excalidraw__embeddable-container:has(iframe.excalidraw__embeddable[src*="/note?"]),
+.excalidraw-host.note-wheel-pan-active .excalidraw__embeddable-container:has(iframe.excalidraw__embeddable[src*="/note.html?"]),
+.excalidraw-host.note-wheel-pan-active .excalidraw__embeddable-container__inner:has(iframe.excalidraw__embeddable[src*="/note?"]),
+.excalidraw-host.note-wheel-pan-active .excalidraw__embeddable-container__inner:has(iframe.excalidraw__embeddable[src*="/note.html?"]),
+.excalidraw-host.note-wheel-pan-active .excalidraw__embeddable__outer:has(iframe.excalidraw__embeddable[src*="/note?"]),
+.excalidraw-host.note-wheel-pan-active .excalidraw__embeddable__outer:has(iframe.excalidraw__embeddable[src*="/note.html?"]),
+.excalidraw-host.note-wheel-pan-active iframe.excalidraw__embeddable[src*="/note?"],
+.excalidraw-host.note-wheel-pan-active iframe.excalidraw__embeddable[src*="/note.html?"] {
+  pointer-events: none !important;
 }
 
 .excalidraw .default-sidebar-trigger {
@@ -143,4 +192,253 @@ body {
   min-height: 100vh;
   display: grid;
   place-items: center;
+}
+
+.note-body {
+  overflow: hidden;
+  background: transparent;
+  overscroll-behavior: contain;
+}
+
+.note-body--standalone {
+  background: #f7f7f5;
+}
+
+.note-body--standalone #note-root {
+  display: grid;
+  place-items: center;
+  padding: 2rem;
+}
+
+.note-card {
+  width: calc(100% - 0.875rem);
+  height: calc(100vh - 1rem);
+  min-height: 10rem;
+  margin: 0.5rem 0.4375rem;
+  display: grid;
+  grid-template-rows: auto 1fr;
+  gap: 0.875rem;
+  padding: 1.25rem 1.35rem;
+  border: 1px solid rgb(30 30 30 / 6%);
+  border-radius: 1.25rem;
+  background: rgb(255 255 255 / 92%);
+  color: #2f3033;
+  font: 16px/1.45 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  box-shadow:
+    0 14px 30px rgb(30 30 30 / 8%),
+    0 1px 0 rgb(255 255 255 / 80%) inset;
+}
+
+.note-body--standalone .note-card {
+  width: 420px;
+  height: 220px;
+  margin: 0;
+}
+
+.note-card__header {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 2.25rem 1fr;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.note-card__avatar {
+  width: 2.25rem;
+  height: 2.25rem;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  background: #1f2937;
+  color: #ffffff;
+  font-weight: 700;
+  font-size: 0.9rem;
+}
+
+.note-card__identity {
+  min-width: 0;
+  display: grid;
+  gap: 0.0625rem;
+}
+
+.note-card__name {
+  color: #202124;
+  font-weight: 700;
+  line-height: 1.1;
+}
+
+.note-card__meta {
+  color: #9a9aa0;
+  font-size: 0.875rem;
+  line-height: 1.1;
+}
+
+.note-card__textarea {
+  width: 100%;
+  height: 100%;
+  min-height: 5rem;
+  overflow: auto;
+  overscroll-behavior: contain;
+  resize: none;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: #55575c;
+  font: inherit;
+  letter-spacing: 0;
+  outline: none;
+}
+
+.note-card__textarea::placeholder {
+  color: #a3a3a8;
+}
+
+.sticky-note-app {
+  --sticky-paper: #fff3bf;
+  --sticky-paper-bright: #fff8d2;
+  --sticky-paper-deep: #ffe08a;
+  --sticky-stroke: #d89a18;
+  --sticky-stroke-soft: rgb(216 154 24 / 45%);
+  --sticky-ink: #3d2f12;
+  --sticky-fold: #e4aa2d;
+  --sticky-hachure: rgb(216 154 24 / 18%);
+  width: calc(100% - 0.875rem);
+  height: calc(100vh - 1.125rem);
+  min-height: 7.5rem;
+  margin: 0.7rem 0.45rem 0.35rem;
+  position: relative;
+  display: block;
+  overflow: visible;
+  padding: 1.45rem 1.25rem 1rem;
+  border: 0;
+  border-radius: 0;
+  background:
+    linear-gradient(140deg, transparent 0 calc(100% - 1.05rem), color-mix(in srgb, var(--sticky-fold) 48%, transparent) calc(100% - 1rem) 100%),
+    radial-gradient(circle at 16% 18%, rgb(255 255 255 / 42%), transparent 27%),
+    linear-gradient(180deg, var(--sticky-paper-bright) 0%, var(--sticky-paper) 54%, var(--sticky-paper-deep) 100%);
+  color: var(--sticky-ink);
+  font: 15px/1.32 "Virgil", "Bradley Hand", "Comic Sans MS", "Segoe Print", cursive, system-ui, sans-serif;
+  box-shadow:
+    0 10px 18px rgb(79 63 22 / 10%),
+    0 2px 0 rgb(255 255 255 / 55%) inset,
+    0 -1px 0 rgb(192 130 18 / 16%) inset;
+  transform: rotate(-1.2deg);
+}
+
+.sticky-note-body--standalone .sticky-note-app {
+  width: 360px;
+  height: 180px;
+  margin: 0;
+}
+
+.sticky-note-app__tape {
+  position: absolute;
+  z-index: 3;
+  top: -0.43rem;
+  left: 50%;
+  width: 4.05rem;
+  height: 0.86rem;
+  border: 1px solid rgb(120 105 68 / 14%);
+  background:
+    repeating-linear-gradient(90deg, rgb(123 105 61 / 8%) 0 5px, transparent 5px 10px),
+    linear-gradient(90deg, rgb(181 164 126 / 32%), rgb(245 232 192 / 72%), rgb(181 164 126 / 28%));
+  box-shadow: 0 1px 2px rgb(79 63 22 / 10%);
+  transform: translateX(-50%) rotate(1.3deg);
+  opacity: 0.92;
+}
+
+.sticky-note-app__edge {
+  position: absolute;
+  z-index: 2;
+  inset: -0.04rem -0.08rem -0.08rem -0.04rem;
+  width: calc(100% + 0.14rem);
+  height: calc(100% + 0.14rem);
+  pointer-events: none;
+  overflow: visible;
+}
+
+.sticky-note-app__edge path {
+  fill: none;
+  stroke: var(--sticky-stroke);
+  stroke-width: 1.55;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+
+.sticky-note-app__edge-secondary {
+  opacity: 0.34;
+  stroke-width: 1;
+}
+
+.sticky-note-app__hachure {
+  position: absolute;
+  z-index: 1;
+  inset: 0.32rem 0.46rem 0.42rem 0.48rem;
+  width: calc(100% - 0.94rem);
+  height: calc(100% - 0.74rem);
+  pointer-events: none;
+  opacity: 0.9;
+}
+
+.sticky-note-app__hachure path {
+  fill: none;
+  stroke: var(--sticky-hachure);
+  stroke-width: 0.9;
+  stroke-linecap: round;
+  vector-effect: non-scaling-stroke;
+}
+
+.sticky-note-app__hachure path:nth-child(3n) {
+  opacity: 0.62;
+  stroke-width: 0.65;
+}
+
+.sticky-note-app__hachure path:nth-child(4n) {
+  opacity: 0.48;
+}
+
+.sticky-note-app__corner {
+  position: absolute;
+  z-index: 3;
+  right: 0;
+  bottom: 0;
+  width: 1.12rem;
+  height: 1.12rem;
+  background:
+    linear-gradient(135deg, transparent 0 49%, var(--sticky-fold) 50% 100%),
+    linear-gradient(135deg, var(--sticky-paper) 0 48%, color-mix(in srgb, var(--sticky-fold) 72%, #ffffff) 49% 100%);
+  filter: drop-shadow(-1px -1px 1px rgb(79 63 22 / 12%));
+  clip-path: polygon(100% 0, 100% 100%, 0 100%);
+}
+
+.sticky-note-app--running,
+.sticky-note-app--queued {
+  outline: 2px dashed rgb(105 101 219 / 45%);
+  outline-offset: -0.375rem;
+}
+
+.sticky-note-app__textarea {
+  position: relative;
+  z-index: 4;
+  width: 100%;
+  height: 100%;
+  min-height: 4.5rem;
+  resize: none;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--sticky-ink);
+  font: inherit;
+  letter-spacing: 0;
+  outline: none;
+  text-shadow: 0 0 0 currentColor;
+}
+
+.sticky-note-app__textarea::placeholder {
+  color: rgb(79 63 22 / 58%);
+}
+
+.sticky-note-app__textarea:focus::placeholder {
+  color: rgb(79 63 22 / 36%);
 }
