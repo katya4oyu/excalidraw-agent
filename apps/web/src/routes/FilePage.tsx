@@ -53,9 +53,13 @@ export function FilePage() {
       return;
     }
 
-    const handleImageToolPointerDown = (event: PointerEvent) => {
+    const isImageToolEvent = (event: Event) => {
       const target = event.target;
-      if (!(target instanceof Element) || !target.closest("label")?.querySelector("[data-testid='toolbar-image']")) {
+      return target instanceof Element && Boolean(target.closest("label")?.querySelector("[data-testid='toolbar-image']"));
+    };
+
+    const handleImageToolPointerDown = (event: PointerEvent) => {
+      if (!isImageToolEvent(event)) {
         return;
       }
 
@@ -64,9 +68,20 @@ export function FilePage() {
       openFallbackImagePicker();
     };
 
+    const handleImageToolClick = (event: MouseEvent) => {
+      if (!isImageToolEvent(event)) {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+    };
+
     shell.addEventListener("pointerdown", handleImageToolPointerDown, { capture: true });
+    shell.addEventListener("click", handleImageToolClick, { capture: true });
     return () => {
       shell.removeEventListener("pointerdown", handleImageToolPointerDown, { capture: true });
+      shell.removeEventListener("click", handleImageToolClick, { capture: true });
     };
   }, [openFallbackImagePicker]);
 
@@ -212,6 +227,8 @@ async function insertImageFile(api: ExcalidrawImperativeAPI, file: File): Promis
       },
     },
   });
+  api.setActiveTool({ type: "selection" });
+  api.resetCursor();
 }
 
 function readImageFile(file: File): Promise<{ dataURL: string; height: number; width: number }> {
