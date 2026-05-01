@@ -94,6 +94,7 @@ export interface NoteEmbedOptions {
   fileId: FileId;
   link: string;
   noteId?: string;
+  text?: string;
   x: number;
   y: number;
   width?: number;
@@ -110,6 +111,7 @@ export interface ExcalidrawNoteEmbedMetadata {
   kind: "note-embed";
   fileId: FileId;
   noteId: string;
+  text?: string;
 }
 
 export type NoteStatus =
@@ -429,6 +431,7 @@ export const createNoteEmbedElement = ({
   height = 220,
   link,
   noteId = `note-${crypto.randomUUID()}`,
+  text = "",
   width = 420,
   x,
   y,
@@ -469,6 +472,7 @@ export const createNoteEmbedElement = ({
         kind: "note-embed",
         fileId,
         noteId,
+        text,
       } satisfies ExcalidrawNoteEmbedMetadata,
     },
   };
@@ -533,6 +537,7 @@ export const getNoteEmbedMetadata = (
     kind: "note-embed",
     fileId: metadata.fileId,
     noteId: metadata.noteId,
+    ...(typeof metadata.text === "string" ? { text: metadata.text } : {}),
   };
 };
 

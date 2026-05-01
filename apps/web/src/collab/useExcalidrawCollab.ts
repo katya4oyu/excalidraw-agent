@@ -176,19 +176,20 @@ export function useExcalidrawCollab({ fileId, excalidrawElement }: UseExcalidraw
         return;
       }
 
-      if (event.data.fileId !== fileId || !(event.source instanceof Window)) {
+      const source = event.source;
+      if (event.data.fileId !== fileId || !isWindowMessageSource(source)) {
         return;
       }
 
-      noteWindowsRef.current.set(event.data.noteId, event.source);
+      noteWindowsRef.current.set(event.data.noteId, source);
       if (event.data.type === "excalidraw-agent:noteReady") {
-        sendNoteState(event.data.noteId, event.source);
+        sendNoteState(event.data.noteId, source);
         return;
       }
 
       if (event.data.type === "excalidraw-agent:noteTextChanged") {
         updateNoteText(ydoc, fileId, event.data.noteId, event.data.text);
-        sendNoteState(event.data.noteId, event.source);
+        sendNoteState(event.data.noteId, source);
       }
     };
     const observeNoteState = () => {
@@ -623,7 +624,17 @@ function restoreManagedNoteLinks(
 function readNoteState(ydoc: Y.Doc, fileId: string, noteId: string): NoteRecord | null {
   const note = ydoc.getMap<Record<string, unknown>>("notes").get(noteId);
   if (!isNoteRecord(note)) {
-    return null;
+    const elementMetadata = findNoteEmbedMetadata(ydoc, fileId, noteId);
+    if (!elementMetadata || typeof elementMetadata.text !== "string") {
+      return null;
+    }
+
+    const now = Date.now();
+    return {
+      ...createNoteRecord(fileId, noteId, now),
+      text: elementMetadata.text,
+      updatedAt: now,
+    };
   }
 
   const request = typeof note.requestId === "string"
@@ -645,11 +656,26 @@ function readNoteState(ydoc: Y.Doc, fileId: string, noteId: string): NoteRecord 
   };
 }
 
+function findNoteEmbedMetadata(
+  ydoc: Y.Doc,
+  fileId: string,
+  noteId: string,
+): ReturnType<typeof getNoteEmbedMetadata> {
+  for (const item of ydoc.getArray<Y.Map<unknown>>("elements").toArray()) {
+    const metadata = getNoteEmbedMetadata(item.get("el"));
+    if (metadata?.fileId === fileId && metadata.noteId === noteId) {
+      return metadata;
+    }
+  }
+
+  return null;
+}
+
 function updateNoteText(ydoc: Y.Doc, fileId: string, noteId: string, text: string): void {
   const notes = ydoc.getMap<Record<string, unknown>>("notes");
   const current = notes.get(noteId);
   const now = Date.now();
-  notes.set(noteId, {
+  const nextNote = {
     ...(isRecord(current) ? current : createNoteRecord(fileId, noteId, now)),
     schemaVersion: 1,
     fileId,
@@ -657,7 +683,48 @@ function updateNoteText(ydoc: Y.Doc, fileId: string, noteId: string, text: strin
     text,
     status: readEditableNoteStatus(current),
     updatedAt: now,
+  };
+
+  ydoc.transact(() => {
+    notes.set(noteId, nextNote);
+    mirrorNoteTextToEmbedCustomData(ydoc, fileId, noteId, text);
   });
+}
+
+function mirrorNoteTextToEmbedCustomData(
+  ydoc: Y.Doc,
+  fileId: string,
+  noteId: string,
+  text: string,
+): void {
+  for (const item of ydoc.getArray<Y.Map<unknown>>("elements").toArray()) {
+    const element = item.get("el");
+    const metadata = getNoteEmbedMetadata(element);
+    if (!isRecord(element) || metadata?.fileId !== fileId || metadata.noteId !== noteId) {
+      continue;
+    }
+
+    const customData = isRecord(element.customData) ? element.customData : {};
+    const excalidrawAgent = isRecord(customData.excalidrawAgent) ? customData.excalidrawAgent : {};
+    item.set("el", {
+      ...element,
+      customData: {
+        ...customData,
+        excalidrawAgent: {
+          ...excalidrawAgent,
+          schemaVersion: 1,
+          kind: "note-embed",
+          fileId,
+          noteId,
+          text,
+        },
+      },
+      updated: Date.now(),
+      version: typeof element.version === "number" ? element.version + 1 : 1,
+      versionNonce: Math.floor(Math.random() * 1_000_000),
+    });
+    return;
+  }
 }
 
 function readNoteStatus(
@@ -734,6 +801,14 @@ function isNoteToParentMessage(value: unknown): value is NoteToParentMessage {
         typeof value.height === "number"
       )
     )
+  );
+}
+
+function isWindowMessageSource(source: MessageEventSource | null): source is Window {
+  return (
+    source !== null &&
+    typeof (source as { postMessage?: unknown }).postMessage === "function" &&
+    !("start" in source)
   );
 }
 

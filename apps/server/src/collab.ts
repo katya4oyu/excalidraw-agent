@@ -5,6 +5,7 @@ import {
   type AgentRunQueueRequest,
   fileIdFromDocumentName,
   getAgentInstructionPrompt,
+  getNoteEmbedMetadata,
   getNoteText,
   normalizeExcalidrawElementPositions,
   type CollabDocumentName,
@@ -162,7 +163,11 @@ const getCurrentInstructionPrompt = (
 ): string | null => {
   const noteId = request.sourceNoteId ?? request.noteId;
   if (noteId) {
-    return getNoteText(stores.notes.get(noteId) ?? stores.legacyInstructionNotes.get(noteId));
+    return (
+      getNoteText(stores.notes.get(noteId) ?? stores.legacyInstructionNotes.get(noteId)) ??
+      getNoteEmbedMetadata(stores.elementsById.get(noteId))?.text?.trim() ??
+      null
+    );
   }
 
   if (request.elementId) {

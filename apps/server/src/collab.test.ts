@@ -3,6 +3,7 @@ import { describe, test } from "node:test";
 import * as Y from "yjs";
 import {
   createAgentInstructionNoteElements,
+  createNoteEmbedElement,
   createExcalidrawYMap,
   toDocumentName,
   type FileId,
@@ -73,6 +74,35 @@ describe("agent instruction request trigger", () => {
     assert.equal(getRequestStatus(ydoc, "request-1"), "running");
     assert.equal(runs.length, 1);
     assert.equal(runs[0]?.sourceNoteId, "note-1");
+  });
+
+  test("starts an agent from embeddable note metadata when the notes map is missing", () => {
+    const ydoc = new Y.Doc();
+    ydoc.getArray<Y.Map<unknown>>("elements").push([
+      createExcalidrawYMap(createNoteEmbedElement({
+        fileId: "file-1",
+        link: "http://127.0.0.1:5173/note?fileId=file-1&noteId=note-1",
+        noteId: "note-1",
+        text: "customData から復元して実行",
+        x: 0,
+        y: 0,
+      })),
+    ]);
+    ydoc.getMap("agentInstructionRequests").set("request-1", {
+      status: "queued",
+      source: "instruction-note",
+      prompt: "customData から復元して実行",
+      sourceNoteId: "note-1",
+      createdAt: 1,
+      updatedAt: 1,
+    });
+    const agents = new FakeAgentStarter();
+
+    startAgentFromInstructionRequests(ydoc, "file-1", agents);
+
+    assert.equal(agents.enqueues.length, 1);
+    assert.equal(agents.enqueues[0]?.requestId, "request-1");
+    assert.equal(getRequestStatus(ydoc, "request-1"), "running");
   });
 
   test("starts an agent from a queued api request without note text validation", () => {

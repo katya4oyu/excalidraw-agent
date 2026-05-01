@@ -173,11 +173,20 @@ describe("agent instruction elements", () => {
       kind: "note-embed",
       fileId: "file-1",
       noteId: "note-1",
+      text: "",
     });
   });
 
-  test("stores note text outside the embeddable element", () => {
+  test("stores note text in note records and mirrors it into embeddable metadata", () => {
     const note = createNoteRecord("file-1", "note-1", 1);
+    const element = createNoteEmbedElement({
+      fileId: "file-1",
+      link: "http://127.0.0.1:5173/note?fileId=file-1&noteId=note-1",
+      noteId: "note-1",
+      text: "図を整理して",
+      x: 10,
+      y: 20,
+    });
 
     assert.deepEqual(note, {
       schemaVersion: 1,
@@ -190,5 +199,6 @@ describe("agent instruction elements", () => {
     });
     assert.equal(getNoteText(note), null);
     assert.equal(getNoteText({ ...note, text: "  図を整理して  " }), "図を整理して");
+    assert.equal(getNoteEmbedMetadata(element)?.text, "図を整理して");
   });
 });
