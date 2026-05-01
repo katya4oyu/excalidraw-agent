@@ -28,6 +28,7 @@ export interface ExcalidrawAgentGhostElementMetadata {
   operation: AgentGhostOperation;
   targetElementId?: string;
   finalElementId?: string;
+  originalStyle?: Record<string, unknown>;
   createdAt: number;
 }
 
@@ -113,6 +114,7 @@ export const createAgentGhostElement = (
   options: AgentGhostElementOptions,
 ): Record<string, unknown> => {
   const metadata = createAgentGhostMetadata(options);
+  metadata.originalStyle = pickOriginalElementStyle(element);
 
   return {
     ...element,
@@ -157,6 +159,146 @@ export const isAgentGhostElement = (element: unknown): boolean => {
   );
 };
 
+export const getAgentGhostMetadata = (
+  element: unknown,
+): ExcalidrawAgentGhostElementMetadata | null => {
+  if (!isAgentGhostElement(element) || !isRecord(element)) {
+    return null;
+  }
+
+  const customData = element.customData;
+  if (!isRecord(customData)) {
+    return null;
+  }
+
+  const metadata = customData.excalidrawAgent;
+  if (!isRecord(metadata)) {
+    return null;
+  }
+
+  return {
+    schemaVersion: 1,
+    kind: "ghost",
+    runId: metadata.runId as string,
+    proposalId: metadata.proposalId as string,
+    operation: metadata.operation as AgentGhostOperation,
+    ...(typeof metadata.targetElementId === "string" ? { targetElementId: metadata.targetElementId } : {}),
+    ...(typeof metadata.finalElementId === "string" ? { finalElementId: metadata.finalElementId } : {}),
+    ...(isRecord(metadata.originalStyle) ? { originalStyle: metadata.originalStyle } : {}),
+    createdAt: metadata.createdAt as number,
+  };
+};
+
+export const approveAgentProposal = (
+  stores: Pick<ExcalidrawYStores, "elements" | "agentRuns" | "agentProposals">,
+  proposalId: string,
+  now = Date.now(),
+): boolean => {
+  const proposal = stores.agentProposals?.get(proposalId);
+  if (!isRecord(proposal) || proposal.status !== "proposed") {
+    return false;
+  }
+
+  let changed = false;
+  stores.elements.doc?.transact(() => {
+    for (const item of stores.elements.toArray()) {
+      const element = item.get("el");
+      const metadata = getAgentGhostMetadata(element);
+      if (!metadata || metadata.proposalId !== proposalId || !isRecord(element)) {
+        continue;
+      }
+
+      if (metadata.operation === "add") {
+        item.set("el", materializeAgentGhostElement(element, metadata, now));
+        changed = true;
+        continue;
+      }
+
+      item.set("el", {
+        ...element,
+        isDeleted: true,
+        updated: now,
+        version: typeof element.version === "number" ? element.version + 1 : 1,
+        versionNonce: Math.floor(Math.random() * 1_000_000),
+      });
+      changed = true;
+    }
+
+    if (!changed) {
+      return;
+    }
+
+    stores.agentProposals?.set(proposalId, {
+      ...proposal,
+      status: "approved",
+      approvedAt: now,
+      updatedAt: now,
+    });
+    const runId = typeof proposal.runId === "string" ? proposal.runId : proposalId;
+    const run = stores.agentRuns?.get(runId);
+    stores.agentRuns?.set(runId, {
+      ...(isRecord(run) ? run : {}),
+      status: "applied",
+      appliedAt: now,
+      updatedAt: now,
+    });
+  });
+
+  return changed;
+};
+
+export const rejectAgentProposal = (
+  stores: Pick<ExcalidrawYStores, "elements" | "agentRuns" | "agentProposals">,
+  proposalId: string,
+  now = Date.now(),
+): boolean => {
+  const proposal = stores.agentProposals?.get(proposalId);
+  if (!isRecord(proposal) || proposal.status !== "proposed") {
+    return false;
+  }
+
+  let changed = false;
+  stores.elements.doc?.transact(() => {
+    for (const item of stores.elements.toArray()) {
+      const element = item.get("el");
+      const metadata = getAgentGhostMetadata(element);
+      if (!metadata || metadata.proposalId !== proposalId || !isRecord(element)) {
+        continue;
+      }
+
+      item.set("el", {
+        ...element,
+        isDeleted: true,
+        updated: now,
+        version: typeof element.version === "number" ? element.version + 1 : 1,
+        versionNonce: Math.floor(Math.random() * 1_000_000),
+      });
+      changed = true;
+    }
+
+    if (!changed) {
+      return;
+    }
+
+    stores.agentProposals?.set(proposalId, {
+      ...proposal,
+      status: "rejected",
+      rejectedAt: now,
+      updatedAt: now,
+    });
+    const runId = typeof proposal.runId === "string" ? proposal.runId : proposalId;
+    const run = stores.agentRuns?.get(runId);
+    stores.agentRuns?.set(runId, {
+      ...(isRecord(run) ? run : {}),
+      status: "rejected",
+      rejectedAt: now,
+      updatedAt: now,
+    });
+  });
+
+  return changed;
+};
+
 export const summarizeAgentFooterState = (
   input: {
     runs?: unknown[];
@@ -180,6 +322,53 @@ export const summarizeAgentFooterState = (
     proposedCount,
     ghostElementCount,
   };
+};
+
+const materializeAgentGhostElement = (
+  element: Record<string, unknown>,
+  metadata: ExcalidrawAgentGhostElementMetadata,
+  now: number,
+): Record<string, unknown> => {
+  const customData = isRecord(element.customData) ? element.customData : {};
+  const { excalidrawAgent: _excalidrawAgent, ...restCustomData } = customData;
+  const hasCustomData = Object.keys(restCustomData).length > 0;
+
+  return {
+    ...element,
+    ...(metadata.originalStyle ?? {}),
+    id: metadata.finalElementId ?? stripGhostPrefix(String(element.id ?? crypto.randomUUID())),
+    opacity: 100,
+    locked: false,
+    customData: hasCustomData ? restCustomData : undefined,
+    updated: now,
+    version: typeof element.version === "number" ? element.version + 1 : 1,
+    versionNonce: Math.floor(Math.random() * 1_000_000),
+  };
+};
+
+const stripGhostPrefix = (id: string): string => {
+  const parts = id.split(":");
+  return parts[0] === "ghost" && parts.length >= 3 ? parts.slice(2).join(":") : id;
+};
+
+const originalStyleKeys = [
+  "backgroundColor",
+  "fillStyle",
+  "opacity",
+  "roughness",
+  "strokeColor",
+  "strokeStyle",
+  "strokeWidth",
+] as const;
+
+const pickOriginalElementStyle = (element: Record<string, unknown>): Record<string, unknown> => {
+  const style: Record<string, unknown> = {};
+  for (const key of originalStyleKeys) {
+    if (key in element) {
+      style[key] = element[key];
+    }
+  }
+  return style;
 };
 
 export const readAgentFooterState = (

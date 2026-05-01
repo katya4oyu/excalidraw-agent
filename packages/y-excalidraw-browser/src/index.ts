@@ -1,9 +1,15 @@
-import { readAgentFooterState, type AgentFooterState } from "@excalidraw-agent/y-excalidraw-core";
+import {
+  approveAgentProposal,
+  readAgentFooterState,
+  rejectAgentProposal,
+  type AgentFooterState,
+} from "@excalidraw-agent/y-excalidraw-core";
 import { ExcalidrawBinding } from "@mizuka-wu/y-excalidraw";
 import type * as Y from "yjs";
 
 export { ExcalidrawBinding };
 export type { AgentFooterState } from "@excalidraw-agent/y-excalidraw-core";
+export { approveAgentProposal, rejectAgentProposal };
 
 export interface AgentFooterStateObserverStores {
   elements: Y.Array<Y.Map<unknown>>;

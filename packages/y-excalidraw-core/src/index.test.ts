@@ -3,9 +3,11 @@ import { describe, test } from "node:test";
 import * as Y from "yjs";
 import {
   appendElements,
+  approveAgentProposal,
   createAgentGhostElement,
   isAgentGhostElement,
   readAgentFooterState,
+  rejectAgentProposal,
   summarizeAgentFooterState,
 } from "./index.ts";
 
@@ -52,6 +54,10 @@ describe("agent ghost elements", () => {
         operation: "add",
         targetElementId: undefined,
         finalElementId: "shape-1",
+        originalStyle: {
+          opacity: 100,
+          strokeColor: "#000000",
+        },
         createdAt: 123,
       },
     });
@@ -99,5 +105,55 @@ describe("agent ghost elements", () => {
       proposedCount: 1,
       ghostElementCount: 1,
     });
+  });
+
+  test("approves add proposals by materializing ghost elements", () => {
+    const ydoc = new Y.Doc();
+    const elements = ydoc.getArray<Y.Map<unknown>>("elements");
+    const agentRuns = ydoc.getMap("agentRuns");
+    const agentProposals = ydoc.getMap("agentProposals");
+    const ghost = createAgentGhostElement(
+      { id: "shape-1", type: "rectangle", opacity: 100, locked: false, strokeColor: "#000000" },
+      { runId: "run-1", operation: "add", finalElementId: "shape-1", createdAt: 123 },
+    );
+
+    appendElements({ elements }, [ghost]);
+    agentRuns.set("run-1", { status: "proposed" });
+    agentProposals.set("run-1", { status: "proposed", runId: "run-1", proposalId: "run-1" });
+
+    assert.equal(approveAgentProposal({ elements, agentRuns, agentProposals }, "run-1", 456), true);
+
+    const [item] = elements.toArray();
+    const element = item?.get("el") as Record<string, unknown>;
+    assert.equal(element.id, "shape-1");
+    assert.equal(element.opacity, 100);
+    assert.equal(element.strokeColor, "#000000");
+    assert.equal(element.locked, false);
+    assert.equal(isAgentGhostElement(element), false);
+    assert.equal((agentRuns.get("run-1") as Record<string, unknown>).status, "applied");
+    assert.equal((agentProposals.get("run-1") as Record<string, unknown>).status, "approved");
+  });
+
+  test("rejects proposals by deleting ghost elements", () => {
+    const ydoc = new Y.Doc();
+    const elements = ydoc.getArray<Y.Map<unknown>>("elements");
+    const agentRuns = ydoc.getMap("agentRuns");
+    const agentProposals = ydoc.getMap("agentProposals");
+    const ghost = createAgentGhostElement(
+      { id: "shape-1", type: "rectangle" },
+      { runId: "run-1", operation: "add", finalElementId: "shape-1", createdAt: 123 },
+    );
+
+    appendElements({ elements }, [ghost]);
+    agentRuns.set("run-1", { status: "proposed" });
+    agentProposals.set("run-1", { status: "proposed", runId: "run-1", proposalId: "run-1" });
+
+    assert.equal(rejectAgentProposal({ elements, agentRuns, agentProposals }, "run-1", 456), true);
+
+    const [item] = elements.toArray();
+    const element = item?.get("el") as Record<string, unknown>;
+    assert.equal(element.isDeleted, true);
+    assert.equal((agentRuns.get("run-1") as Record<string, unknown>).status, "rejected");
+    assert.equal((agentProposals.get("run-1") as Record<string, unknown>).status, "rejected");
   });
 });

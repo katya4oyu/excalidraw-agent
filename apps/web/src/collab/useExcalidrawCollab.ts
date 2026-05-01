@@ -12,8 +12,10 @@ import {
   type ParentToNoteMessage,
 } from "@excalidraw-agent/shared";
 import {
+  approveAgentProposal,
   createAgentFooterStateObserver,
   ExcalidrawBinding,
+  rejectAgentProposal,
   type AgentFooterState,
 } from "@excalidraw-agent/y-excalidraw-browser";
 import * as Y from "yjs";
@@ -60,6 +62,11 @@ export function useExcalidrawCollab({ fileId, excalidrawElement }: UseExcalidraw
   const ydocRef = useRef<Y.Doc | null>(null);
   const requestedInstructionPromptsRef = useRef(new Map<string, string>());
   const noteWindowsRef = useRef(new Map<string, Window>());
+  const proposalStoresRef = useRef<{
+    elements: Y.Array<Y.Map<unknown>>;
+    agentRuns: Y.Map<unknown>;
+    agentProposals: Y.Map<unknown>;
+  } | null>(null);
   const [agentFooterState, setAgentFooterState] = useState<AgentFooterState>({
     runStatus: "idle",
     activeRunCount: 0,
@@ -106,6 +113,11 @@ export function useExcalidrawCollab({ fileId, excalidrawElement }: UseExcalidraw
     const yAgentRuns = ydoc.getMap("agentRuns");
     const yAgentProposals = ydoc.getMap("agentProposals");
     const yNotes = ydoc.getMap<Record<string, unknown>>("notes");
+    proposalStoresRef.current = {
+      elements: yElements,
+      agentRuns: yAgentRuns,
+      agentProposals: yAgentProposals,
+    };
     const localOrigin = {};
     const undoManagerOptions = excalidrawElement.querySelector(".undo-redo-buttons")
       ? {
@@ -202,6 +214,7 @@ export function useExcalidrawCollab({ fileId, excalidrawElement }: UseExcalidraw
     return () => {
       setBinding(null);
       ydocRef.current = null;
+      proposalStoresRef.current = null;
       setAgentPresence(null);
       requestedInstructionPromptsRef.current.clear();
       noteWindowsRef.current.clear();
@@ -365,6 +378,26 @@ export function useExcalidrawCollab({ fileId, excalidrawElement }: UseExcalidraw
     setIsAgentInstructionMode((current) => !current);
   }, []);
 
+  const approveLatestProposal = useCallback(() => {
+    const stores = proposalStoresRef.current;
+    if (!stores) {
+      return false;
+    }
+
+    const proposalId = getLatestProposedProposalId(stores.agentProposals);
+    return proposalId ? approveAgentProposal(stores, proposalId) : false;
+  }, []);
+
+  const rejectLatestProposal = useCallback(() => {
+    const stores = proposalStoresRef.current;
+    if (!stores) {
+      return false;
+    }
+
+    const proposalId = getLatestProposedProposalId(stores.agentProposals);
+    return proposalId ? rejectAgentProposal(stores, proposalId) : false;
+  }, []);
+
   const onChange = useCallback((elements: readonly Record<string, unknown>[], appState: AppState) => {
     const nextViewportState = {
       scrollX: appState.scrollX,
@@ -475,11 +508,29 @@ export function useExcalidrawCollab({ fileId, excalidrawElement }: UseExcalidraw
     isAgentInstructionMode,
     onChange,
     onPointerUp,
+    approveLatestProposal,
+    rejectLatestProposal,
     setApi,
     status,
     toggleAgentInstructionMode,
     viewportState,
   };
+}
+
+function getLatestProposedProposalId(agentProposals: Y.Map<unknown>): string | null {
+  let latest: { id: string; createdAt: number } | null = null;
+  for (const [id, proposal] of agentProposals.entries()) {
+    if (!isRecord(proposal) || proposal.status !== "proposed") {
+      continue;
+    }
+
+    const createdAt = typeof proposal.createdAt === "number" ? proposal.createdAt : 0;
+    if (!latest || createdAt >= latest.createdAt) {
+      latest = { id, createdAt };
+    }
+  }
+
+  return latest?.id ?? null;
 }
 
 function clamp(value: number, min: number, max: number): number {

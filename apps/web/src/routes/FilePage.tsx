@@ -32,10 +32,12 @@ export function FilePage() {
     api,
     agentPresence,
     agentFooterState,
+    approveLatestProposal,
     binding,
     isAgentInstructionMode,
     onChange,
     onPointerUp,
+    rejectLatestProposal,
     setApi,
     status,
     toggleAgentInstructionMode,
@@ -136,6 +138,8 @@ export function FilePage() {
               isInstructionMode={isAgentInstructionMode}
               runError={runError}
               selectedModel={selectedModel}
+              onApproveProposal={approveLatestProposal}
+              onRejectProposal={rejectLatestProposal}
               onModelChange={(model) => {
                 setSelectedModel(model);
                 window.localStorage.setItem(agentModelStorageKey, model);
@@ -360,6 +364,8 @@ function AgentFooterTools({
   isStartingRun,
   isInstructionMode,
   onModelChange,
+  onApproveProposal,
+  onRejectProposal,
   onRunAgent,
   onToggleInstructionMode,
   runError,
@@ -370,6 +376,8 @@ function AgentFooterTools({
   isStartingRun: boolean;
   isInstructionMode: boolean;
   onModelChange: (model: string) => void;
+  onApproveProposal: () => boolean;
+  onRejectProposal: () => boolean;
   onRunAgent: () => void;
   onToggleInstructionMode: () => void;
   runError: string | null;
@@ -377,6 +385,7 @@ function AgentFooterTools({
 }) {
   const label = toAgentFooterLabel(agent);
   const isRunDisabled = isStartingRun || isAgentRunActive(agent);
+  const hasProposal = agent.proposedCount > 0 || agent.ghostElementCount > 0;
   const statusTitle = [
     label,
     agent.ghostElementCount > 0 ? `${agent.ghostElementCount} ghost proposal${agent.ghostElementCount === 1 ? "" : "s"}` : "",
@@ -427,6 +436,28 @@ function AgentFooterTools({
       >
         <PlayerPlayIcon />
       </button>
+      {hasProposal ? (
+        <>
+          <button
+            aria-label="Approve agent proposal"
+            className="agent-footer-tools__button agent-footer-tools__button--approve"
+            title="Approve proposal"
+            type="button"
+            onClick={onApproveProposal}
+          >
+            <CheckIcon />
+          </button>
+          <button
+            aria-label="Reject agent proposal"
+            className="agent-footer-tools__button agent-footer-tools__button--reject"
+            title="Reject proposal"
+            type="button"
+            onClick={onRejectProposal}
+          >
+            <XIcon />
+          </button>
+        </>
+      ) : null}
       <button
         aria-label="More agent tools"
         className="agent-footer-tools__button"
@@ -496,6 +527,34 @@ function MessageCircleIcon() {
 function PlayerPlayIcon() {
   return createToolbarIcon(
     <path d="M7 5v14l11 -7z" fill="currentColor" />,
+  );
+}
+
+// tabler-icons: check
+function CheckIcon() {
+  return createToolbarIcon(
+    <path
+      d="M5 12l5 5l10 -10"
+      fill="none"
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth="1.75"
+    />,
+  );
+}
+
+// tabler-icons: x
+function XIcon() {
+  return createToolbarIcon(
+    <path
+      d="M18 6l-12 12M6 6l12 12"
+      fill="none"
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth="1.75"
+    />,
   );
 }
 

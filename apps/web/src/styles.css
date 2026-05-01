@@ -346,6 +346,22 @@ body {
   background: var(--color-primary-light);
 }
 
+.agent-footer-tools__button--approve {
+  color: #2b8a3e;
+}
+
+.agent-footer-tools__button--approve:hover:not(:disabled) {
+  background: rgba(43, 138, 62, 0.12);
+}
+
+.agent-footer-tools__button--reject {
+  color: #d32f2f;
+}
+
+.agent-footer-tools__button--reject:hover:not(:disabled) {
+  background: rgba(211, 47, 47, 0.1);
+}
+
 .agent-footer-tools__button:disabled {
   color: var(--text-secondary-color);
   cursor: default;
