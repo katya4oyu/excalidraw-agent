@@ -32,9 +32,9 @@ export const createCollabServer = (db: CollabDatabase, agents: CollabAgentSuperv
     debounce: 500,
     maxDebounce: 2_000,
 
-    async connected({ documentName }) {
+    async connected({ documentName, requestParameters }) {
       const fileId = fileIdFromDocumentName(documentName);
-      if (!fileId) {
+      if (!fileId || isWorkerConnection(requestParameters)) {
         return;
       }
 
@@ -43,9 +43,9 @@ export const createCollabServer = (db: CollabDatabase, agents: CollabAgentSuperv
       agents.ensureWorker(fileId);
     },
 
-    async onDisconnect({ documentName }) {
+    async onDisconnect({ documentName, requestParameters }) {
       const fileId = fileIdFromDocumentName(documentName);
-      if (!fileId) {
+      if (!fileId || isWorkerConnection(requestParameters)) {
         return;
       }
 
@@ -210,6 +210,10 @@ const getCurrentInstructionPrompt = (
 
 const isRecord = (value: unknown): value is Record<string, unknown> => {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+};
+
+const isWorkerConnection = (requestParameters: URLSearchParams): boolean => {
+  return requestParameters.get("source") === "worker";
 };
 
 type QueuedInstructionRequest = {

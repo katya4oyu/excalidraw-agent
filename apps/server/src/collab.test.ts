@@ -226,12 +226,15 @@ describe("agent instruction request trigger", () => {
 
     await collab.configuration.connected?.({
       documentName,
+      requestParameters: new URLSearchParams(),
     } as Parameters<NonNullable<typeof collab.configuration.connected>>[0]);
     await collab.configuration.connected?.({
       documentName,
+      requestParameters: new URLSearchParams(),
     } as Parameters<NonNullable<typeof collab.configuration.connected>>[0]);
     await collab.configuration.onDisconnect?.({
       documentName,
+      requestParameters: new URLSearchParams(),
     } as Parameters<NonNullable<typeof collab.configuration.onDisconnect>>[0]);
 
     assert.deepEqual(agents.ensureWorkerCalls, ["file-1", "file-1"]);
@@ -239,6 +242,7 @@ describe("agent instruction request trigger", () => {
 
     await collab.configuration.onDisconnect?.({
       documentName,
+      requestParameters: new URLSearchParams(),
     } as Parameters<NonNullable<typeof collab.configuration.onDisconnect>>[0]);
 
     assert.deepEqual(agents.scheduledStops, ["file-1"]);
@@ -252,17 +256,40 @@ describe("agent instruction request trigger", () => {
 
     await collab.configuration.connected?.({
       documentName,
+      requestParameters: new URLSearchParams(),
     } as Parameters<NonNullable<typeof collab.configuration.connected>>[0]);
     await collab.configuration.onDisconnect?.({
       documentName,
+      requestParameters: new URLSearchParams(),
     } as Parameters<NonNullable<typeof collab.configuration.onDisconnect>>[0]);
     await collab.configuration.connected?.({
       documentName,
+      requestParameters: new URLSearchParams(),
     } as Parameters<NonNullable<typeof collab.configuration.connected>>[0]);
 
     assert.deepEqual(agents.scheduledStops, ["file-1"]);
     assert.deepEqual(agents.cancelledStops, ["file-1", "file-1"]);
     assert.deepEqual(agents.ensureWorkerCalls, ["file-1", "file-1"]);
+  });
+
+  test("ignores worker websocket connections for human lifecycle counts", async () => {
+    const documentName = toDocumentName("file-1");
+    const db = new FakeDatabase(documentName, null);
+    const agents = new FakeAgentStarter();
+    const collab = createCollabServer(db, agents);
+    const workerParameters = new URLSearchParams({ source: "worker" });
+
+    await collab.configuration.connected?.({
+      documentName,
+      requestParameters: workerParameters,
+    } as Parameters<NonNullable<typeof collab.configuration.connected>>[0]);
+    await collab.configuration.onDisconnect?.({
+      documentName,
+      requestParameters: workerParameters,
+    } as Parameters<NonNullable<typeof collab.configuration.onDisconnect>>[0]);
+
+    assert.deepEqual(agents.ensureWorkerCalls, []);
+    assert.deepEqual(agents.scheduledStops, []);
   });
 
   test("leaves a second queued request untouched while a run is active", () => {

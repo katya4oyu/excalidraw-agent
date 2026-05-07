@@ -681,6 +681,7 @@ function truncate(value: string, maxLength: number): string {
 function toCollabWebSocketUrl(serverUrl: string): string {
   const url = new URL("/collab", serverUrl);
   url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+  url.searchParams.set("source", "worker");
   return url.toString();
 }
 
