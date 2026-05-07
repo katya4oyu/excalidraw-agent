@@ -456,10 +456,10 @@ function AgentFooterTools({
 }) {
   const label = toAgentFooterLabel(agent);
   const codexStatusLabel = toCodexStatusLabel(codexStatus);
-  const codexDisabledReason = toCodexDisabledReason(codexStatus);
+  const codexWarning = toCodexWarning(codexStatus);
   const runProgressLog = isAgentRunActive(agent) ? getLatestAgentLog(agentPresence) : null;
   const workerStatusLabel = toWorkerStatusLabel(workerStatus);
-  const runDisabledReason = isStartingRun ? "Agent is starting" : isAgentRunActive(agent) ? "Agent is already running" : codexDisabledReason;
+  const runDisabledReason = isStartingRun ? "Agent is starting" : isAgentRunActive(agent) ? "Agent is already running" : null;
   const isRunDisabled = Boolean(runDisabledReason);
   const hasProposal = agent.proposedCount > 0 || agent.ghostElementCount > 0;
   const statusTitle = [
@@ -468,6 +468,7 @@ function AgentFooterTools({
     agent.ghostElementCount > 0 ? `${agent.ghostElementCount} ghost proposal${agent.ghostElementCount === 1 ? "" : "s"}` : "",
     `Codex: ${codexStatusLabel}`,
     codexStatus?.message ? `Codex message: ${codexStatus.message}` : "",
+    codexWarning ? `Codex warning: ${codexWarning}` : "",
     `Worker: ${workerStatusLabel}`,
     `Collab: ${collabStatus}`,
     runDisabledReason ? `Run disabled: ${runDisabledReason}` : "",
@@ -485,6 +486,11 @@ function AgentFooterTools({
       <span className="agent-footer-tools__text" title={statusTitle}>
         {runProgressLog ?? `worker ${workerStatusLabel}`}
       </span>
+      {codexWarning ? (
+        <span className="agent-footer-tools__warning" title={codexWarning}>
+          {codexWarning}
+        </span>
+      ) : null}
       <span className="agent-footer-tools__separator" aria-hidden="true" />
       <label className="agent-footer-tools__model" title="Model selection is UI-only in this version">
         <span className="agent-footer-tools__model-text">
@@ -595,9 +601,9 @@ function toWorkerStatusLabel(status: AgentStatus | "unknown"): string {
   return status === "idle" ? "ready" : status;
 }
 
-function toCodexDisabledReason(status: CodexStatusResponse | null): string | null {
+function toCodexWarning(status: CodexStatusResponse | null): string | null {
   if (!status) {
-    return "Checking Codex status";
+    return "checking Codex";
   }
 
   if (status.status === "available") {

@@ -283,6 +283,15 @@ body {
   white-space: nowrap;
 }
 
+.agent-footer-tools__warning {
+  max-width: 8rem;
+  overflow: hidden;
+  color: #d97706;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .agent-footer-tools__separator {
   width: 1px;
   height: 1.5rem;
