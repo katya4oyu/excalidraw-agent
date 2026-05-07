@@ -56,30 +56,6 @@ export function FilePage() {
   }, []);
 
   useEffect(() => {
-    let isMounted = true;
-
-    getCodexStatus()
-      .then((status) => {
-        if (isMounted) {
-          setCodexStatus(status);
-        }
-      })
-      .catch((error) => {
-        if (isMounted) {
-          setCodexStatus({
-            status: "error",
-            authMethod: null,
-            message: error instanceof Error ? error.message : String(error),
-          });
-        }
-      });
-
-    return () => {
-      isMounted = false;
-    };
-  }, []);
-
-  useEffect(() => {
     if (!id) {
       return;
     }
@@ -106,6 +82,39 @@ export function FilePage() {
       window.clearInterval(interval);
     };
   }, [id]);
+
+  useEffect(() => {
+    if (workerStatus === "unknown" || workerStatus === "starting") {
+      setCodexStatus(null);
+      return;
+    }
+
+    let isMounted = true;
+    const refreshCodexStatus = () => {
+      void getCodexStatus()
+        .then((status) => {
+          if (isMounted) {
+            setCodexStatus(status);
+          }
+        })
+        .catch((error) => {
+          if (isMounted) {
+            setCodexStatus({
+              status: "error",
+              authMethod: null,
+              message: error instanceof Error ? error.message : String(error),
+            });
+          }
+        });
+    };
+
+    refreshCodexStatus();
+    const interval = window.setInterval(refreshCodexStatus, 10_000);
+    return () => {
+      isMounted = false;
+      window.clearInterval(interval);
+    };
+  }, [workerStatus]);
 
   useEffect(() => {
     const shell = shellRef.current;
@@ -603,7 +612,7 @@ function toWorkerStatusLabel(status: AgentStatus | "unknown"): string {
 
 function toCodexWarning(status: CodexStatusResponse | null): string | null {
   if (!status) {
-    return "checking Codex";
+    return null;
   }
 
   if (status.status === "available") {
