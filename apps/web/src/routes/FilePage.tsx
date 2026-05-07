@@ -4,8 +4,8 @@ import { useParams } from "react-router";
 import { Excalidraw, Footer, WelcomeScreen } from "@excalidraw/excalidraw";
 import "@excalidraw/excalidraw/index.css";
 import { generateKeyBetween } from "fractional-indexing";
-import { getNoteEmbedMetadata } from "@excalidraw-agent/shared";
-import { getCodexStatus, startAgentRun, type CodexStatusResponse } from "../api";
+import { getNoteEmbedMetadata, type AgentStatus } from "@excalidraw-agent/shared";
+import { getCodexStatus, getFile, startAgentRun, type CodexStatusResponse } from "../api";
 import { useExcalidrawCollab, type AgentPresenceState } from "../collab/useExcalidrawCollab";
 import type { AgentFooterState } from "@excalidraw-agent/y-excalidraw-browser";
 import type { ExcalidrawImperativeAPI } from "@excalidraw/excalidraw/types";
@@ -29,6 +29,7 @@ export function FilePage() {
   const [isStartingRun, setIsStartingRun] = useState(false);
   const [runError, setRunError] = useState<string | null>(null);
   const [codexStatus, setCodexStatus] = useState<CodexStatusResponse | null>(null);
+  const [workerStatus, setWorkerStatus] = useState<AgentStatus | "unknown">("unknown");
   const {
     api,
     agentPresence,
@@ -77,6 +78,34 @@ export function FilePage() {
       isMounted = false;
     };
   }, []);
+
+  useEffect(() => {
+    if (!id) {
+      return;
+    }
+
+    let isMounted = true;
+    const refreshWorkerStatus = () => {
+      void getFile(id)
+        .then((file) => {
+          if (isMounted) {
+            setWorkerStatus(file.agentStatus);
+          }
+        })
+        .catch(() => {
+          if (isMounted) {
+            setWorkerStatus("unknown");
+          }
+        });
+    };
+
+    refreshWorkerStatus();
+    const interval = window.setInterval(refreshWorkerStatus, 2_000);
+    return () => {
+      isMounted = false;
+      window.clearInterval(interval);
+    };
+  }, [id]);
 
   useEffect(() => {
     const shell = shellRef.current;
@@ -166,6 +195,7 @@ export function FilePage() {
               isStartingRun={isStartingRun}
               isInstructionMode={isAgentInstructionMode}
               isAutoModeEnabled={agentSettings.autoModeEnabled}
+              workerStatus={workerStatus}
               runError={runError}
               selectedModel={selectedModel}
               onApproveProposal={approveLatestProposal}
@@ -405,6 +435,7 @@ function AgentFooterTools({
   onToggleInstructionMode,
   runError,
   selectedModel,
+  workerStatus,
 }: {
   agent: AgentFooterState;
   agentPresence: AgentPresenceState | null;
@@ -421,11 +452,13 @@ function AgentFooterTools({
   onToggleInstructionMode: () => void;
   runError: string | null;
   selectedModel: string;
+  workerStatus: AgentStatus | "unknown";
 }) {
   const label = toAgentFooterLabel(agent);
   const codexStatusLabel = toCodexStatusLabel(codexStatus);
   const codexDisabledReason = toCodexDisabledReason(codexStatus);
   const runProgressLog = isAgentRunActive(agent) ? getLatestAgentLog(agentPresence) : null;
+  const workerStatusLabel = toWorkerStatusLabel(workerStatus);
   const runDisabledReason = isStartingRun ? "Agent is starting" : isAgentRunActive(agent) ? "Agent is already running" : codexDisabledReason;
   const isRunDisabled = Boolean(runDisabledReason);
   const hasProposal = agent.proposedCount > 0 || agent.ghostElementCount > 0;
@@ -435,6 +468,7 @@ function AgentFooterTools({
     agent.ghostElementCount > 0 ? `${agent.ghostElementCount} ghost proposal${agent.ghostElementCount === 1 ? "" : "s"}` : "",
     `Codex: ${codexStatusLabel}`,
     codexStatus?.message ? `Codex message: ${codexStatus.message}` : "",
+    `Worker: ${workerStatusLabel}`,
     `Collab: ${collabStatus}`,
     runDisabledReason ? `Run disabled: ${runDisabledReason}` : "",
     runError ? `Last run failed: ${runError}` : "",
@@ -449,7 +483,7 @@ function AgentFooterTools({
         />
       </span>
       <span className="agent-footer-tools__text" title={statusTitle}>
-        {runProgressLog ?? codexStatusLabel}
+        {runProgressLog ?? `worker ${workerStatusLabel}`}
       </span>
       <span className="agent-footer-tools__separator" aria-hidden="true" />
       <label className="agent-footer-tools__model" title="Model selection is UI-only in this version">
@@ -554,6 +588,10 @@ function toCodexStatusLabel(status: CodexStatusResponse | null): string {
 
   const authMethod = toCodexAuthMethodLabel(status.authMethod);
   return authMethod ? `${status.status} · ${authMethod}` : status.status;
+}
+
+function toWorkerStatusLabel(status: AgentStatus | "unknown"): string {
+  return status === "idle" ? "ready" : status;
 }
 
 function toCodexDisabledReason(status: CodexStatusResponse | null): string | null {
