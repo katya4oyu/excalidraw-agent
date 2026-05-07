@@ -3,6 +3,7 @@ import { createNodeWebSocket } from "@hono/node-ws";
 import type { WebSocketLike } from "@hocuspocus/server";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
+import { pathToFileURL } from "node:url";
 import * as Y from "yjs";
 import {
   createExcalidrawYMap,
@@ -15,165 +16,199 @@ import {
   type ImportFileRequest,
   type ImportFileResponse,
 } from "@excalidraw-agent/shared";
-import { AgentSupervisor } from "./agent";
-import { createCollabServer } from "./collab";
-import { AppDatabase } from "./db";
+import { AgentSupervisor } from "./agent.ts";
+import { createCollabServer } from "./collab.ts";
+import { getCodexStatus, type CodexStatus } from "./codexStatus.ts";
+import { AppDatabase } from "./db.ts";
 
 const port = Number(process.env.PORT ?? 8787);
 const host = process.env.HOST ?? "127.0.0.1";
 const publicBaseUrl = process.env.PUBLIC_BASE_URL ?? `http://${host}:${port}`;
 
-const db = new AppDatabase();
-const agents = new AgentSupervisor(db, publicBaseUrl);
-const hocuspocus = createCollabServer(db, agents);
-type HocuspocusClientConnection = ReturnType<typeof hocuspocus.handleConnection>;
+type HocuspocusClientConnection = ReturnType<ReturnType<typeof createCollabServer>["handleConnection"]>;
 
-const app = new Hono();
-const { injectWebSocket, upgradeWebSocket } = createNodeWebSocket({ app });
+interface ServerAppDependencies {
+  agents: AgentSupervisor;
+  app?: Hono;
+  codexStatusProvider?: () => Promise<CodexStatus>;
+  db: AppDatabase;
+  hocuspocus: ReturnType<typeof createCollabServer>;
+  upgradeWebSocket?: ReturnType<typeof createNodeWebSocket>["upgradeWebSocket"];
+}
 
-app.use(
-  "*",
-  cors({
-    origin: (origin) => origin,
-    allowMethods: ["GET", "POST", "OPTIONS"],
-    allowHeaders: ["content-type", "authorization"],
-    credentials: true,
-  }),
-);
+export function createApp({
+  agents,
+  app = new Hono(),
+  codexStatusProvider = getCodexStatus,
+  db,
+  hocuspocus,
+  upgradeWebSocket,
+}: ServerAppDependencies): Hono {
+  app.use(
+    "*",
+    cors({
+      origin: (origin) => origin,
+      allowMethods: ["GET", "POST", "OPTIONS"],
+      allowHeaders: ["content-type", "authorization"],
+      credentials: true,
+    }),
+  );
 
-app.get("/health", (c) => {
-  return c.json({ ok: true });
-});
-
-app.post("/api/files", (c) => {
-  const id = createFileId();
-  const documentName = toDocumentName(id);
-  db.createFile(id, documentName, "idle");
-
-  return c.json<CreateFileResponse>({ id }, 201);
-});
-
-app.post("/api/files/import", async (c) => {
-  const body = await c.req.json().catch(() => null) as ImportFileRequest | null;
-  if (!body || !isRecord(body.document)) {
-    return c.json({ error: "document is required" }, 400);
-  }
-
-  const metadata = getExcalidrawAgentMetadata(body.document);
-  const requestedFileId = typeof body.fileId === "string" && body.fileId.trim()
-    ? body.fileId.trim()
-    : metadata?.fileId;
-
-  if (requestedFileId) {
-    const existing = db.getFile(requestedFileId);
-    if (existing) {
-      return c.json<ImportFileResponse>({
-        id: existing.id,
-        documentName: existing.documentName,
-        created: false,
-        imported: false,
-      });
-    }
-  }
-
-  const id = requestedFileId ?? createFileId();
-  const documentName = toDocumentName(id);
-  db.createFile(id, documentName, "verified");
-  storeExcalidrawDocument(documentName, body.document);
-
-  return c.json<ImportFileResponse>({
-    id,
-    documentName,
-    created: true,
-    imported: true,
-  }, 201);
-});
-
-app.post("/api/files/:id/agent-runs", async (c) => {
-  const fileId = c.req.param("id");
-  const file = db.getFile(fileId);
-  if (!file) {
-    return c.json({ error: "file not found" }, 404);
-  }
-
-  const body = await c.req.json().catch(() => null) as { prompt?: unknown } | null;
-  const prompt = typeof body?.prompt === "string" ? body.prompt.trim() : "";
-  if (!prompt) {
-    return c.json({ error: "prompt is required" }, 400);
-  }
-
-  agents.ensureWorker(file.id);
-  const requestId = `api-run-${crypto.randomUUID()}`;
-  const connection = await hocuspocus.openDirectConnection(file.documentName, {
-    source: "api",
+  app.get("/health", (c) => {
+    return c.json({ ok: true });
   });
 
-  try {
-    await connection.transact((document) => {
-      const now = Date.now();
-      document.getMap<Record<string, unknown>>("agentInstructionRequests").set(requestId, {
-        status: "queued",
-        source: "api",
-        prompt,
-        createdAt: now,
-        updatedAt: now,
-      });
+  app.get("/api/codex/status", async (c) => {
+    return c.json(await codexStatusProvider());
+  });
+
+  app.post("/api/files", (c) => {
+    const id = createFileId();
+    const documentName = toDocumentName(id);
+    db.createFile(id, documentName, "idle");
+
+    return c.json<CreateFileResponse>({ id }, 201);
+  });
+
+  app.post("/api/files/import", async (c) => {
+    const body = await c.req.json().catch(() => null) as ImportFileRequest | null;
+    if (!body || !isRecord(body.document)) {
+      return c.json({ error: "document is required" }, 400);
+    }
+
+    const metadata = getExcalidrawAgentMetadata(body.document);
+    const requestedFileId = typeof body.fileId === "string" && body.fileId.trim()
+      ? body.fileId.trim()
+      : metadata?.fileId;
+
+    if (requestedFileId) {
+      const existing = db.getFile(requestedFileId);
+      if (existing) {
+        return c.json<ImportFileResponse>({
+          id: existing.id,
+          documentName: existing.documentName,
+          created: false,
+          imported: false,
+        });
+      }
+    }
+
+    const id = requestedFileId ?? createFileId();
+    const documentName = toDocumentName(id);
+    db.createFile(id, documentName, "verified");
+    storeExcalidrawDocument(db, documentName, body.document);
+
+    return c.json<ImportFileResponse>({
+      id,
+      documentName,
+      created: true,
+      imported: true,
+    }, 201);
+  });
+
+  app.post("/api/files/:id/agent-runs", async (c) => {
+    const fileId = c.req.param("id");
+    const file = db.getFile(fileId);
+    if (!file) {
+      return c.json({ error: "file not found" }, 404);
+    }
+
+    const body = await c.req.json().catch(() => null) as { prompt?: unknown } | null;
+    const prompt = typeof body?.prompt === "string" ? body.prompt.trim() : "";
+    if (!prompt) {
+      return c.json({ error: "prompt is required" }, 400);
+    }
+
+    agents.ensureWorker(file.id);
+    const requestId = `api-run-${crypto.randomUUID()}`;
+    const connection = await hocuspocus.openDirectConnection(file.documentName, {
+      source: "api",
     });
-  } finally {
-    await connection.disconnect();
+
+    try {
+      await connection.transact((document) => {
+        const now = Date.now();
+        document.getMap<Record<string, unknown>>("agentInstructionRequests").set(requestId, {
+          status: "queued",
+          source: "api",
+          prompt,
+          createdAt: now,
+          updatedAt: now,
+        });
+      });
+    } finally {
+      await connection.disconnect();
+    }
+
+    return c.json({
+      fileId: file.id,
+      requestId,
+      agentStatus: "queued",
+    }, 202);
+  });
+
+  app.get("/api/files/:id", (c) => {
+    const file = db.getFile(c.req.param("id"));
+
+    if (!file) {
+      return c.json({ error: "file not found" }, 404);
+    }
+
+    return c.json(file);
+  });
+
+  if (upgradeWebSocket) {
+    app.get(
+      "/collab",
+      upgradeWebSocket((c) => {
+        let clientConnection: HocuspocusClientConnection | undefined;
+
+        return {
+          onOpen(_event, ws) {
+            ws.raw!.binaryType = "arraybuffer";
+            clientConnection = hocuspocus.handleConnection(ws.raw as WebSocketLike, c.req.raw, {});
+          },
+          async onMessage(event) {
+            const data = await toUint8Array(event.data);
+            clientConnection?.handleMessage(data);
+          },
+          onClose() {
+            clientConnection?.handleClose();
+          },
+        };
+      }),
+    );
   }
 
-  return c.json({
-    fileId: file.id,
-    requestId,
-    agentStatus: "queued",
-  }, 202);
-});
+  return app;
+}
 
-app.get("/api/files/:id", (c) => {
-  const file = db.getFile(c.req.param("id"));
+export function startServer(): void {
+  const db = new AppDatabase();
+  const agents = new AgentSupervisor(db, publicBaseUrl);
+  const hocuspocus = createCollabServer(db, agents);
+  const app = new Hono();
+  const { injectWebSocket, upgradeWebSocket } = createNodeWebSocket({ app });
+  createApp({ agents, app, db, hocuspocus, upgradeWebSocket });
 
-  if (!file) {
-    return c.json({ error: "file not found" }, 404);
-  }
+  const server = serve(
+    {
+      fetch: app.fetch,
+      hostname: host,
+      port,
+    },
+    () => {
+      console.log(`Server listening at ${publicBaseUrl}`);
+      console.log(`Hocuspocus websocket at ${publicBaseUrl.replace(/^http/, "ws")}/collab`);
+    },
+  );
 
-  return c.json(file);
-});
+  injectWebSocket(server);
+}
 
-app.get(
-  "/collab",
-  upgradeWebSocket((c) => {
-    let clientConnection: HocuspocusClientConnection | undefined;
-
-    return {
-      onOpen(_event, ws) {
-        ws.raw!.binaryType = "arraybuffer";
-        clientConnection = hocuspocus.handleConnection(ws.raw as WebSocketLike, c.req.raw, {});
-      },
-      async onMessage(event) {
-        const data = await toUint8Array(event.data);
-        clientConnection?.handleMessage(data);
-      },
-      onClose() {
-        clientConnection?.handleClose();
-      },
-    };
-  }),
-);
-
-const server = serve(
-  {
-    fetch: app.fetch,
-    hostname: host,
-    port,
-  },
-  () => {
-    console.log(`Server listening at ${publicBaseUrl}`);
-    console.log(`Hocuspocus websocket at ${publicBaseUrl.replace(/^http/, "ws")}/collab`);
-  },
-);
-
-injectWebSocket(server);
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  startServer();
+}
 
 async function toUint8Array(data: string | ArrayBuffer | SharedArrayBuffer | Uint8Array | Blob): Promise<Uint8Array> {
   if (data instanceof Uint8Array) {
@@ -195,7 +230,11 @@ async function toUint8Array(data: string | ArrayBuffer | SharedArrayBuffer | Uin
   return new TextEncoder().encode(data);
 }
 
-function storeExcalidrawDocument(documentName: `file:${string}`, document: ExcalidrawDocumentData): void {
+function storeExcalidrawDocument(
+  db: AppDatabase,
+  documentName: `file:${string}`,
+  document: ExcalidrawDocumentData,
+): void {
   const ydoc = new Y.Doc();
   const yElements = ydoc.getArray<Y.Map<unknown>>("elements");
   const yAssets = ydoc.getMap("assets");

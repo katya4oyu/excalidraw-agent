@@ -3,13 +3,17 @@ import { describe, test } from "node:test";
 import * as Y from "yjs";
 import {
   agentInstructionPlaceholderText,
+  createAgentRunRequest,
   createAgentInstructionElement,
   createAgentInstructionNoteElements,
+  createBaseRevisionSnapshot,
   createExcalidrawAgentMetadata,
   createExcalidrawYMap,
   createNoteEmbedElement,
   createNoteRecord,
+  defaultAgentSettings,
   fileIdFromDocumentName,
+  findElementSnapshot,
   getAgentInstructionPrompt,
   getExcalidrawAgentMetadata,
   getNoteEmbedMetadata,
@@ -200,5 +204,75 @@ describe("agent instruction elements", () => {
     assert.equal(getNoteText(note), null);
     assert.equal(getNoteText({ ...note, text: "  図を整理して  " }), "図を整理して");
     assert.equal(getNoteEmbedMetadata(element)?.text, "図を整理して");
+  });
+});
+
+describe("agent run requests", () => {
+  test("creates queued run requests with explicit trigger metadata", () => {
+    assert.deepEqual(
+      createAgentRunRequest({
+        fileId: "file-1",
+        prompt: "整理して",
+        source: "manual",
+        trigger: { type: "button" },
+        now: 10,
+      }),
+      {
+        schemaVersion: 1,
+        status: "queued",
+        source: "manual",
+        prompt: "整理して",
+        fileId: "file-1",
+        trigger: { type: "button" },
+        createdAt: 10,
+        updatedAt: 10,
+      },
+    );
+  });
+
+  test("defaults auto mode to off with a 30 second idle window", () => {
+    assert.deepEqual(defaultAgentSettings(20), {
+      schemaVersion: 1,
+      autoModeEnabled: false,
+      autoIdleMs: 30_000,
+      updatedAt: 20,
+    });
+  });
+});
+
+describe("base revisions", () => {
+  test("builds stable hashes and element version snapshots", () => {
+    const first = createBaseRevisionSnapshot({
+      elements: [
+        { id: "b", type: "rectangle", version: 2, versionNonce: 20, updated: 200, isDeleted: false },
+        { id: "a", type: "text", version: 1, versionNonce: 10, updated: 100, isDeleted: false, selected: true },
+        { id: "deleted", type: "ellipse", version: 1, isDeleted: true },
+      ],
+      assets: { z: { id: "asset" } },
+      notes: { note: { text: "memo" } },
+    });
+    const second = createBaseRevisionSnapshot({
+      elements: [
+        { selected: false, updated: 100, versionNonce: 10, version: 1, type: "text", isDeleted: false, id: "a" },
+        { updated: 200, versionNonce: 20, version: 2, type: "rectangle", isDeleted: false, id: "b" },
+      ],
+      notes: { note: { text: "memo" } },
+      assets: { z: { id: "asset" } },
+    });
+
+    assert.equal(first.hash, second.hash);
+    assert.match(first.hash, /^scene:[0-9a-f]{8}$/);
+    assert.deepEqual(first.elements, [
+      { id: "a", version: 1, versionNonce: 10, updated: 100, isDeleted: false },
+      { id: "b", version: 2, versionNonce: 20, updated: 200, isDeleted: false },
+    ]);
+    assert.deepEqual(findElementSnapshot(first, "b"), {
+      id: "b",
+      version: 2,
+      versionNonce: 20,
+      updated: 200,
+      isDeleted: false,
+    });
+    assert.equal(findElementSnapshot(first, "missing"), null);
   });
 });

@@ -62,3 +62,22 @@ export async function startAgentRun(
 
   return response.json() as Promise<{ agentStatus: string; fileId: string; requestId: string }>;
 }
+
+export type CodexAvailability = "available" | "not_logged_in" | "error";
+export type CodexAuthMethod = "chatgpt" | "api_key" | "access_token" | "unknown" | null;
+
+export interface CodexStatusResponse {
+  status: CodexAvailability;
+  authMethod: CodexAuthMethod;
+  message?: string;
+}
+
+export async function getCodexStatus(): Promise<CodexStatusResponse> {
+  const response = await fetch("/api/codex/status");
+
+  if (!response.ok) {
+    throw new Error(`Failed to load Codex status: ${response.status}`);
+  }
+
+  return response.json() as Promise<CodexStatusResponse>;
+}

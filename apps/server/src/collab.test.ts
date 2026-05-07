@@ -218,6 +218,53 @@ describe("agent instruction request trigger", () => {
     assert.deepEqual(agents.enqueues, []);
   });
 
+  test("keeps a worker while websocket connections are open and schedules stop after the last close", async () => {
+    const documentName = toDocumentName("file-1");
+    const db = new FakeDatabase(documentName, null);
+    const agents = new FakeAgentStarter();
+    const collab = createCollabServer(db, agents);
+
+    await collab.configuration.connected?.({
+      documentName,
+    } as Parameters<NonNullable<typeof collab.configuration.connected>>[0]);
+    await collab.configuration.connected?.({
+      documentName,
+    } as Parameters<NonNullable<typeof collab.configuration.connected>>[0]);
+    await collab.configuration.onDisconnect?.({
+      documentName,
+    } as Parameters<NonNullable<typeof collab.configuration.onDisconnect>>[0]);
+
+    assert.deepEqual(agents.ensureWorkerCalls, ["file-1", "file-1"]);
+    assert.deepEqual(agents.scheduledStops, []);
+
+    await collab.configuration.onDisconnect?.({
+      documentName,
+    } as Parameters<NonNullable<typeof collab.configuration.onDisconnect>>[0]);
+
+    assert.deepEqual(agents.scheduledStops, ["file-1"]);
+  });
+
+  test("cancels a scheduled idle stop when the document reconnects during the grace period", async () => {
+    const documentName = toDocumentName("file-1");
+    const db = new FakeDatabase(documentName, null);
+    const agents = new FakeAgentStarter();
+    const collab = createCollabServer(db, agents);
+
+    await collab.configuration.connected?.({
+      documentName,
+    } as Parameters<NonNullable<typeof collab.configuration.connected>>[0]);
+    await collab.configuration.onDisconnect?.({
+      documentName,
+    } as Parameters<NonNullable<typeof collab.configuration.onDisconnect>>[0]);
+    await collab.configuration.connected?.({
+      documentName,
+    } as Parameters<NonNullable<typeof collab.configuration.connected>>[0]);
+
+    assert.deepEqual(agents.scheduledStops, ["file-1"]);
+    assert.deepEqual(agents.cancelledStops, ["file-1", "file-1"]);
+    assert.deepEqual(agents.ensureWorkerCalls, ["file-1", "file-1"]);
+  });
+
   test("leaves a second queued request untouched while a run is active", () => {
     const ydoc = createInstructionDocument("最初の指示");
     const firstTextId = getTextInstructionId(ydoc);
@@ -261,6 +308,8 @@ describe("agent instruction request trigger", () => {
 class FakeAgentStarter {
   readonly enqueues: Array<{ fileId: FileId; prompt: string; requestId: string; runId: string }> = [];
   readonly ensureWorkerCalls: FileId[] = [];
+  readonly scheduledStops: FileId[] = [];
+  readonly cancelledStops: FileId[] = [];
   active = false;
   private readonly workers = new Set<FileId>();
 
@@ -285,6 +334,14 @@ class FakeAgentStarter {
   }
 
   markFromDocumentName(): void {}
+
+  scheduleIdleWorkerStop(fileId: FileId): void {
+    this.scheduledStops.push(fileId);
+  }
+
+  cancelIdleWorkerStop(fileId: FileId): void {
+    this.cancelledStops.push(fileId);
+  }
 }
 
 class FakeDatabase {

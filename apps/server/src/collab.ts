@@ -20,13 +20,44 @@ interface CollabDatabase {
 interface CollabAgentSupervisor extends AgentInstructionStarter {
   ensureWorker(fileId: FileId): unknown;
   markFromDocumentName(documentName: string, status: "verified"): void;
+  scheduleIdleWorkerStop(fileId: FileId): void;
+  cancelIdleWorkerStop(fileId: FileId): void;
 }
 
 export const createCollabServer = (db: CollabDatabase, agents: CollabAgentSupervisor): Hocuspocus => {
+  const connectionCounts = new Map<FileId, number>();
+
   return new Hocuspocus({
     name: "excalidraw-agent-collab",
     debounce: 500,
     maxDebounce: 2_000,
+
+    async connected({ documentName }) {
+      const fileId = fileIdFromDocumentName(documentName);
+      if (!fileId) {
+        return;
+      }
+
+      connectionCounts.set(fileId, (connectionCounts.get(fileId) ?? 0) + 1);
+      agents.cancelIdleWorkerStop(fileId);
+      agents.ensureWorker(fileId);
+    },
+
+    async onDisconnect({ documentName }) {
+      const fileId = fileIdFromDocumentName(documentName);
+      if (!fileId) {
+        return;
+      }
+
+      const nextCount = Math.max((connectionCounts.get(fileId) ?? 1) - 1, 0);
+      if (nextCount > 0) {
+        connectionCounts.set(fileId, nextCount);
+        return;
+      }
+
+      connectionCounts.delete(fileId);
+      agents.scheduleIdleWorkerStop(fileId);
+    },
 
     async onLoadDocument({ documentName }) {
       const persisted = db.loadDocument(documentName as CollabDocumentName);

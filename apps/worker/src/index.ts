@@ -1,4 +1,3 @@
-import { Codex } from "@openai/codex-sdk";
 import { HocuspocusProvider } from "@hocuspocus/provider";
 import { cpSync, existsSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -12,6 +11,8 @@ import type {
 } from "@excalidraw-agent/shared";
 import { getNoteText, toDocumentName } from "@excalidraw-agent/shared";
 import { publishGhostProposal } from "@excalidraw-agent/y-excalidraw-agent";
+import { createTypeScriptSdkCodexRuntime } from "./runtime.ts";
+import type { CodexRuntime, CodexRuntimeEvent } from "./runtime.ts";
 
 const defaultAgentModel = "gpt-5.3-codex-spark";
 
@@ -30,14 +31,9 @@ async function runOnce(options: AgentWorkerOptions): Promise<void> {
     return;
   }
 
-  const codex = createCodex(options);
-  const thread = codex.startThread({
-    model: defaultAgentModel,
-    workingDirectory: workspace,
-    skipGitRepoCheck: true,
-  });
+  const runtime = createCodexRuntime(options, workspace);
 
-  const result = await thread.run(buildPrompt(options, options.prompt));
+  const result = await runtime.run({ prompt: buildPrompt(options, options.prompt) });
   console.log(result.finalResponse);
 }
 
@@ -47,12 +43,7 @@ async function runDaemon(options: AgentWorkerOptions): Promise<void> {
   const queue: AgentRunQueueRequest[] = [];
   const prepareOnly = process.env.EXCALIDRAW_AGENT_PREPARE_ONLY === "true";
   const collab = prepareOnly ? null : await connectFileDocument(options);
-  const codex = prepareOnly ? null : createCodex(options);
-  const thread = codex?.startThread({
-    model: defaultAgentModel,
-    workingDirectory: workspace,
-    skipGitRepoCheck: true,
-  });
+  const runtime = prepareOnly ? null : createCodexRuntime(options, workspace);
 
   sendToParent({ type: "ready", fileId: options.fileId });
 
@@ -95,11 +86,14 @@ async function runDaemon(options: AgentWorkerOptions): Promise<void> {
       presence?.update("キャンバスを同期し、現在の要素とNoteを読み込んでいます");
       const snapshotPath = collab ? writeRunSnapshot(workspace, collab.document, request) : undefined;
       presence?.update("base-scene.json を保存しました");
-      if (thread) {
+      if (runtime) {
         try {
-          presence?.update("Codex thread.run を開始しました");
-          const result = await thread.run(buildPrompt(options, request.prompt, request, snapshotPath));
-          presence?.update("Codex の応答を受け取りました");
+          const result = await runtime.run({
+            prompt: buildPrompt(options, request.prompt, request, snapshotPath),
+            onEvent: (event) => {
+              handleRuntimeEvent(event, presence);
+            },
+          });
           if (result.finalResponse) {
             console.log(result.finalResponse);
           }
@@ -236,13 +230,38 @@ function waitForProviderSync(provider: HocuspocusProvider): Promise<void> {
   });
 }
 
-function createCodex(options: AgentWorkerOptions): Codex {
-  return new Codex({
+function createCodexRuntime(options: AgentWorkerOptions, workspace: string): CodexRuntime {
+  return createTypeScriptSdkCodexRuntime({
     env: {
       ...process.env,
       EXPRESS_SERVER_URL: options.serverUrl,
     },
+    model: defaultAgentModel,
+    workingDirectory: workspace,
+    skipGitRepoCheck: true,
   });
+}
+
+function handleRuntimeEvent(
+  event: CodexRuntimeEvent,
+  presence?: { update(message: string): void } | null,
+): void {
+  if (event.type === "runStarted") {
+    presence?.update(event.threadId ? `Codex run を開始しました (${event.threadId})` : "Codex run を開始しました");
+    return;
+  }
+
+  if (event.type === "finalResponse") {
+    presence?.update("Codex の最終応答を受け取りました");
+    return;
+  }
+
+  if (event.type === "progress") {
+    presence?.update(event.message);
+    return;
+  }
+
+  presence?.update(`Codex error: ${event.error}`);
 }
 
 function parseArgs(args: string[]): AgentWorkerOptions {

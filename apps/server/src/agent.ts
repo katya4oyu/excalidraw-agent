@@ -19,6 +19,8 @@ interface WorkerProcessState extends WorkerHandle {
   pending: AgentRunQueueRequest[];
   activeRunId?: string;
   stopping?: boolean;
+  idleStopTimer?: ReturnType<typeof setTimeout>;
+  idleStopPending?: boolean;
 }
 
 interface AgentSupervisorDatabase {
@@ -28,11 +30,19 @@ interface AgentSupervisorDatabase {
 export class AgentSupervisor {
   private readonly workers = new Map<FileId, WorkerProcessState>();
   private readonly workerEntry = new URL("../../worker/src/index.ts", import.meta.url).pathname;
+  private readonly db: AgentSupervisorDatabase;
+  private readonly serverUrl: string;
+  private readonly idleWorkerGraceMs: number;
 
   constructor(
-    private readonly db: AgentSupervisorDatabase,
-    private readonly serverUrl: string,
-  ) {}
+    db: AgentSupervisorDatabase,
+    serverUrl: string,
+    idleWorkerGraceMs = 60_000,
+  ) {
+    this.db = db;
+    this.serverUrl = serverUrl;
+    this.idleWorkerGraceMs = idleWorkerGraceMs;
+  }
 
   ensureWorker(fileId: FileId): WorkerHandle {
     const existing = this.workers.get(fileId);
@@ -99,6 +109,7 @@ export class AgentSupervisor {
       return false;
     }
 
+    this.clearIdleStop(worker);
     this.send(worker, { type: "shutdown", reason });
     worker.stopping = true;
     worker.process.disconnect();
@@ -106,6 +117,31 @@ export class AgentSupervisor {
     this.workers.delete(fileId);
     this.db.updateAgentStatus(fileId, "idle");
     return true;
+  }
+
+  scheduleIdleWorkerStop(fileId: FileId, reason = "idle"): void {
+    const worker = this.workers.get(fileId);
+    if (!worker) {
+      return;
+    }
+
+    this.clearIdleStop(worker);
+    worker.idleStopTimer = setTimeout(() => {
+      worker.idleStopTimer = undefined;
+      if (worker.busy || worker.pending.length > 0) {
+        worker.idleStopPending = true;
+        return;
+      }
+
+      this.stopIdleWorker(fileId, reason);
+    }, this.idleWorkerGraceMs);
+  }
+
+  cancelIdleWorkerStop(fileId: FileId): void {
+    const worker = this.workers.get(fileId);
+    if (worker) {
+      this.clearIdleStop(worker);
+    }
   }
 
   markFromDocumentName(documentName: string, status: AgentStatus): void {
@@ -177,6 +213,9 @@ export class AgentSupervisor {
     const request = worker.pending.shift();
     if (!request) {
       this.db.updateAgentStatus(worker.fileId, "idle");
+      if (worker.idleStopPending) {
+        this.stopIdleWorker(worker.fileId, "idle");
+      }
       return;
     }
 
@@ -189,6 +228,14 @@ export class AgentSupervisor {
     if (worker.process.connected) {
       worker.process.send(message);
     }
+  }
+
+  private clearIdleStop(worker: WorkerProcessState): void {
+    if (worker.idleStopTimer) {
+      clearTimeout(worker.idleStopTimer);
+      worker.idleStopTimer = undefined;
+    }
+    worker.idleStopPending = false;
   }
 }
 
