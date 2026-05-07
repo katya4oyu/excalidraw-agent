@@ -512,13 +512,14 @@ function AgentFooterTools({
       </button>
       <button
         aria-label={runDisabledReason ?? "Run Agent"}
-        className="agent-footer-tools__button"
+        className="agent-footer-tools__button agent-footer-tools__button--run"
         disabled={isRunDisabled}
         title={runDisabledReason ?? "Run Agent"}
         type="button"
         onClick={onRunAgent}
       >
         <PlayerPlayIcon />
+        <span>Run</span>
       </button>
       <button
         aria-label={isAutoModeEnabled ? "Disable Auto mode" : "Enable Auto mode"}
