@@ -17,6 +17,29 @@ Please provide all answers in Japanese.
 - Do not commit disposable screenshots, browser verification images, generated previews, or other temporary inspection artifacts.
 - If verification cannot be run, still commit the completed changes when appropriate and state the verification gap in the final response.
 
+## Local Issues
+
+Use `issues/` for repository-level decisions, open questions, design tradeoffs,
+and work items that should be preserved in Git but do not need GitHub Issues.
+
+Create or update an issue when a change introduces or resolves any of these:
+
+- a non-obvious design decision
+- a boundary between runtime, config, storage, API, data, or agent
+  responsibilities
+- a tradeoff that future work will need to remember
+- an open question that should not disappear into chat history
+- a decision that changes how contributors or agents should work
+
+Do not create an issue for every small edit. If the decision is already fully
+captured in stable documentation and has no unresolved tradeoff, updating docs
+is enough.
+
+Prefer updating an existing issue over creating a near-duplicate.
+
+When an issue becomes stable project knowledge, summarize the result in `docs/`
+and keep the issue as decision history.
+
 ## Local Development Servers
 
 - Use the portless tasks for browser-facing verification by default:
