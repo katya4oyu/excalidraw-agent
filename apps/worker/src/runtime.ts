@@ -35,8 +35,10 @@ export function createTypeScriptSdkCodexRuntime(options: TypeScriptSdkCodexRunti
   });
   const thread = codex.startThread({
     model: options.model,
+    sandboxMode: "workspace-write",
     workingDirectory: options.workingDirectory,
     skipGitRepoCheck: options.skipGitRepoCheck,
+    approvalPolicy: "never",
   });
   return new TypeScriptSdkCodexRuntime(thread);
 }

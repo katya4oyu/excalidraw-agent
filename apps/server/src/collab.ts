@@ -2,6 +2,7 @@ import { Hocuspocus } from "@hocuspocus/server";
 import * as Y from "yjs";
 import { randomUUID } from "node:crypto";
 import {
+  type AgentRunRequest,
   type AgentRunQueueRequest,
   fileIdFromDocumentName,
   getAgentInstructionPrompt,
@@ -111,7 +112,8 @@ export const startAgentFromInstructionRequests = (
     return;
   }
 
-  const requests = document.getMap<Record<string, unknown>>("agentInstructionRequests");
+  const runRequests = document.getMap<Record<string, unknown>>("agentRunRequests");
+  const legacyRequests = document.getMap<Record<string, unknown>>("agentInstructionRequests");
   const agentRuns = document.getMap<Record<string, unknown>>("agentRuns");
   const notes = document.getMap<Record<string, unknown>>("notes");
   const legacyInstructionNotes = document.getMap<Record<string, unknown>>("agentInstructionNotes");
@@ -123,19 +125,33 @@ export const startAgentFromInstructionRequests = (
     }
   }
 
-  for (const [requestId, request] of requests.entries()) {
-    if (!isQueuedAgentRequest(request)) {
+  const candidates = [
+    ...Array.from(runRequests.entries()).map(([requestId, request]) => ({
+      requestId,
+      request,
+      store: runRequests,
+    })),
+    ...Array.from(legacyRequests.entries()).map(([requestId, request]) => ({
+      requestId,
+      request: normalizeLegacyRequest(fileId, request),
+      store: legacyRequests,
+    })),
+  ];
+
+  for (const { requestId, request, store } of candidates) {
+    if (!isQueuedAgentRunRequest(request)) {
       continue;
     }
 
-    if (request.source === "instruction-note") {
-      const currentPrompt = getCurrentInstructionPrompt(request, {
+    const instructionRequest = request.source === "instruction-note" ? request as QueuedInstructionRequest : null;
+    if (instructionRequest) {
+      const currentPrompt = getCurrentInstructionPrompt(instructionRequest, {
         elementsById,
         legacyInstructionNotes,
         notes,
       });
       if (currentPrompt !== request.prompt) {
-        requests.set(requestId, {
+        store.set(requestId, {
           ...request,
           status: "stale",
           updatedAt: Date.now(),
@@ -156,19 +172,17 @@ export const startAgentFromInstructionRequests = (
       return;
     }
 
-    const instructionRequest = request.source === "instruction-note" ? request : null;
     document.transact(() => {
-      requests.set(requestId, {
+      const runningRequest = {
+        ...request,
         status: "running",
-        source: request.source,
-        prompt: request.prompt,
         runId,
-        ...(instructionRequest?.elementId ? { elementId: instructionRequest.elementId } : {}),
-        ...(instructionRequest?.noteId ? { noteId: instructionRequest.noteId } : {}),
-        ...(instructionRequest?.sourceNoteId ? { sourceNoteId: instructionRequest.sourceNoteId } : {}),
-        createdAt: request.createdAt,
         updatedAt: now,
-      });
+      };
+      runRequests.set(requestId, runningRequest);
+      if (store !== runRequests) {
+        store.set(requestId, runningRequest);
+      }
       agentRuns.set(runId, {
         status: "running",
         source: request.source,
@@ -216,7 +230,7 @@ const isWorkerConnection = (requestParameters: URLSearchParams): boolean => {
   return requestParameters.get("source") === "worker";
 };
 
-type QueuedInstructionRequest = {
+type QueuedInstructionRequest = AgentRunRequest & {
   createdAt: number;
   elementId?: string;
   noteId?: string;
@@ -226,22 +240,19 @@ type QueuedInstructionRequest = {
   status: "queued";
 };
 
-type QueuedApiRequest = {
-  createdAt: number;
-  prompt: string;
-  source: "api";
-  status: "queued";
-};
+type QueuedAgentRequest = (AgentRunRequest | QueuedInstructionRequest) & { status: "queued" };
 
-type QueuedAgentRequest = QueuedInstructionRequest | QueuedApiRequest;
-
-const isQueuedAgentRequest = (value: unknown): value is QueuedAgentRequest => {
+const isQueuedAgentRunRequest = (value: unknown): value is QueuedAgentRequest => {
   if (!isRecord(value) || value.status !== "queued" || typeof value.prompt !== "string" || !value.prompt.trim()) {
     return false;
   }
 
-  if (value.source === "api") {
-    return typeof value.createdAt === "number";
+  if (
+    value.source === "api" ||
+    value.source === "manual" ||
+    value.source === "auto-idle"
+  ) {
+    return typeof value.createdAt === "number" && typeof value.fileId === "string";
   }
 
   return (
@@ -253,4 +264,50 @@ const isQueuedAgentRequest = (value: unknown): value is QueuedAgentRequest => {
     ) &&
     typeof value.createdAt === "number"
   );
+};
+
+const normalizeLegacyRequest = (fileId: FileId, value: unknown): unknown => {
+  if (!isRecord(value) || value.status !== "queued" || typeof value.prompt !== "string") {
+    return value;
+  }
+
+  const now = typeof value.createdAt === "number" ? value.createdAt : Date.now();
+  if (value.schemaVersion === 1 && typeof value.fileId === "string") {
+    return value;
+  }
+
+  if (value.source === "api") {
+    return {
+      schemaVersion: 1,
+      status: "queued",
+      source: "api",
+      prompt: value.prompt,
+      fileId,
+      trigger: { type: "api" },
+      createdAt: now,
+      updatedAt: typeof value.updatedAt === "number" ? value.updatedAt : now,
+    } satisfies AgentRunRequest;
+  }
+
+  if (value.source === "instruction-note") {
+    return {
+      schemaVersion: 1,
+      status: "queued",
+      source: "instruction-note",
+      prompt: value.prompt,
+      fileId,
+      trigger: { type: "instruction-note" },
+      ...(typeof value.elementId === "string" ? { elementId: value.elementId } : {}),
+      ...(typeof value.noteId === "string" ? { noteId: value.noteId } : {}),
+      ...(typeof value.sourceNoteId === "string" ? { sourceNoteId: value.sourceNoteId } : {}),
+      createdAt: now,
+      updatedAt: typeof value.updatedAt === "number" ? value.updatedAt : now,
+    } satisfies AgentRunRequest & {
+      elementId?: string;
+      noteId?: string;
+      sourceNoteId?: string;
+    };
+  }
+
+  return value;
 };

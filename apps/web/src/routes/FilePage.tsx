@@ -5,7 +5,7 @@ import { Excalidraw, Footer, WelcomeScreen } from "@excalidraw/excalidraw";
 import "@excalidraw/excalidraw/index.css";
 import { generateKeyBetween } from "fractional-indexing";
 import { getNoteEmbedMetadata } from "@excalidraw-agent/shared";
-import { startAgentRun } from "../api";
+import { getCodexStatus, startAgentRun, type CodexStatusResponse } from "../api";
 import { useExcalidrawCollab, type AgentPresenceState } from "../collab/useExcalidrawCollab";
 import type { AgentFooterState } from "@excalidraw-agent/y-excalidraw-browser";
 import type { ExcalidrawImperativeAPI } from "@excalidraw/excalidraw/types";
@@ -28,16 +28,19 @@ export function FilePage() {
   });
   const [isStartingRun, setIsStartingRun] = useState(false);
   const [runError, setRunError] = useState<string | null>(null);
+  const [codexStatus, setCodexStatus] = useState<CodexStatusResponse | null>(null);
   const {
     api,
     agentPresence,
     agentFooterState,
+    agentSettings,
     approveLatestProposal,
     binding,
     isAgentInstructionMode,
     onChange,
     onPointerUp,
     rejectLatestProposal,
+    setAutoModeEnabled,
     setApi,
     status,
     toggleAgentInstructionMode,
@@ -49,6 +52,30 @@ export function FilePage() {
 
   const openFallbackImagePicker = useCallback(() => {
     imageInputRef.current?.click();
+  }, []);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    getCodexStatus()
+      .then((status) => {
+        if (isMounted) {
+          setCodexStatus(status);
+        }
+      })
+      .catch((error) => {
+        if (isMounted) {
+          setCodexStatus({
+            status: "error",
+            authMethod: null,
+            message: error instanceof Error ? error.message : String(error),
+          });
+        }
+      });
+
+    return () => {
+      isMounted = false;
+    };
   }, []);
 
   useEffect(() => {
@@ -133,9 +160,12 @@ export function FilePage() {
           <Footer>
             <AgentFooterTools
               agent={agentFooterState}
+              agentPresence={agentPresence}
+              codexStatus={codexStatus}
               collabStatus={status}
               isStartingRun={isStartingRun}
               isInstructionMode={isAgentInstructionMode}
+              isAutoModeEnabled={agentSettings.autoModeEnabled}
               runError={runError}
               selectedModel={selectedModel}
               onApproveProposal={approveLatestProposal}
@@ -155,6 +185,7 @@ export function FilePage() {
                   setIsStartingRun(false);
                 }
               }}
+              onToggleAutoMode={() => setAutoModeEnabled(!agentSettings.autoModeEnabled)}
               onToggleInstructionMode={toggleAgentInstructionMode}
             />
           </Footer>
@@ -360,36 +391,52 @@ function validateNoteEmbeddable(link: string): boolean {
 
 function AgentFooterTools({
   agent,
+  agentPresence,
+  codexStatus,
   collabStatus,
   isStartingRun,
   isInstructionMode,
+  isAutoModeEnabled,
   onModelChange,
   onApproveProposal,
   onRejectProposal,
   onRunAgent,
+  onToggleAutoMode,
   onToggleInstructionMode,
   runError,
   selectedModel,
 }: {
   agent: AgentFooterState;
+  agentPresence: AgentPresenceState | null;
+  codexStatus: CodexStatusResponse | null;
   collabStatus: string;
   isStartingRun: boolean;
   isInstructionMode: boolean;
+  isAutoModeEnabled: boolean;
   onModelChange: (model: string) => void;
   onApproveProposal: () => boolean;
   onRejectProposal: () => boolean;
   onRunAgent: () => void;
+  onToggleAutoMode: () => void;
   onToggleInstructionMode: () => void;
   runError: string | null;
   selectedModel: string;
 }) {
   const label = toAgentFooterLabel(agent);
-  const isRunDisabled = isStartingRun || isAgentRunActive(agent);
+  const codexStatusLabel = toCodexStatusLabel(codexStatus);
+  const codexDisabledReason = toCodexDisabledReason(codexStatus);
+  const runProgressLog = isAgentRunActive(agent) ? getLatestAgentLog(agentPresence) : null;
+  const runDisabledReason = isStartingRun ? "Agent is starting" : isAgentRunActive(agent) ? "Agent is already running" : codexDisabledReason;
+  const isRunDisabled = Boolean(runDisabledReason);
   const hasProposal = agent.proposedCount > 0 || agent.ghostElementCount > 0;
   const statusTitle = [
     label,
+    runProgressLog ? `Progress: ${runProgressLog}` : "",
     agent.ghostElementCount > 0 ? `${agent.ghostElementCount} ghost proposal${agent.ghostElementCount === 1 ? "" : "s"}` : "",
+    `Codex: ${codexStatusLabel}`,
+    codexStatus?.message ? `Codex message: ${codexStatus.message}` : "",
     `Collab: ${collabStatus}`,
+    runDisabledReason ? `Run disabled: ${runDisabledReason}` : "",
     runError ? `Last run failed: ${runError}` : "",
   ].filter(Boolean).join(" · ");
 
@@ -400,6 +447,9 @@ function AgentFooterTools({
           className={`agent-footer-tools__dot agent-footer-tools__dot--${runError ? "failed" : agent.runStatus}`}
           aria-hidden="true"
         />
+      </span>
+      <span className="agent-footer-tools__text" title={statusTitle}>
+        {runProgressLog ?? codexStatusLabel}
       </span>
       <span className="agent-footer-tools__separator" aria-hidden="true" />
       <label className="agent-footer-tools__model" title="Model selection is UI-only in this version">
@@ -427,14 +477,24 @@ function AgentFooterTools({
         <MessageCircleIcon />
       </button>
       <button
-        aria-label={isRunDisabled ? "Agent is already running" : "Run Agent"}
+        aria-label={runDisabledReason ?? "Run Agent"}
         className="agent-footer-tools__button"
         disabled={isRunDisabled}
-        title={isRunDisabled ? "Agent is already running" : "Run Agent"}
+        title={runDisabledReason ?? "Run Agent"}
         type="button"
         onClick={onRunAgent}
       >
         <PlayerPlayIcon />
+      </button>
+      <button
+        aria-label={isAutoModeEnabled ? "Disable Auto mode" : "Enable Auto mode"}
+        aria-pressed={isAutoModeEnabled}
+        className="agent-footer-tools__button"
+        title={isAutoModeEnabled ? "Auto mode on" : "Auto mode off"}
+        type="button"
+        onClick={onToggleAutoMode}
+      >
+        <RefreshIcon />
       </button>
       {hasProposal ? (
         <>
@@ -487,6 +547,55 @@ function toAgentFooterLabel(agent: AgentFooterState): string {
   return `Agent ${agent.runStatus}`;
 }
 
+function toCodexStatusLabel(status: CodexStatusResponse | null): string {
+  if (!status) {
+    return "checking";
+  }
+
+  const authMethod = toCodexAuthMethodLabel(status.authMethod);
+  return authMethod ? `${status.status} · ${authMethod}` : status.status;
+}
+
+function toCodexDisabledReason(status: CodexStatusResponse | null): string | null {
+  if (!status) {
+    return "Checking Codex status";
+  }
+
+  if (status.status === "available") {
+    return null;
+  }
+
+  return status.message ?? (status.status === "not_logged_in" ? "Codex is not logged in" : "Codex status error");
+}
+
+function toCodexAuthMethodLabel(authMethod: CodexStatusResponse["authMethod"]): string | null {
+  if (!authMethod) {
+    return null;
+  }
+
+  if (authMethod === "api_key") {
+    return "API key";
+  }
+
+  if (authMethod === "access_token") {
+    return "access token";
+  }
+
+  if (authMethod === "chatgpt") {
+    return "ChatGPT";
+  }
+
+  return authMethod;
+}
+
+function getLatestAgentLog(presence: AgentPresenceState | null): string | null {
+  if (!presence) {
+    return null;
+  }
+
+  return presence.logs.at(-1) ?? presence.message;
+}
+
 function isAgentRunActive(agent: AgentFooterState): boolean {
   return agent.activeRunCount > 0 || agent.runStatus === "queued" || agent.runStatus === "running" || agent.runStatus === "applying";
 }
@@ -527,6 +636,16 @@ function MessageCircleIcon() {
 function PlayerPlayIcon() {
   return createToolbarIcon(
     <path d="M7 5v14l11 -7z" fill="currentColor" />,
+  );
+}
+
+// tabler-icons: refresh
+function RefreshIcon() {
+  return createToolbarIcon(
+    <g fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5">
+      <path d="M20 11a8.1 8.1 0 0 0 -15.5 -2m-.5 -4v4h4" />
+      <path d="M4 13a8.1 8.1 0 0 0 15.5 2m.5 4v-4h-4" />
+    </g>,
   );
 }
 

@@ -10,7 +10,7 @@ export type AgentRunStatus =
   | "rejected"
   | "failed"
   | "conflicted";
-export type AgentProposalStatus = "proposed" | "approved" | "rejected" | "stale";
+export type AgentProposalStatus = "proposed" | "approved" | "rejected" | "stale" | "conflicted";
 export type AgentGhostOperation = "add" | "update" | "delete" | "move";
 
 export interface ExcalidrawYStores {
@@ -28,8 +28,19 @@ export interface ExcalidrawAgentGhostElementMetadata {
   operation: AgentGhostOperation;
   targetElementId?: string;
   finalElementId?: string;
+  baseRevision?: string;
+  baseElementSnapshot?: AgentProposalBaseElementSnapshot;
   originalStyle?: Record<string, unknown>;
   createdAt: number;
+}
+
+export interface AgentProposalBaseElementSnapshot {
+  id: string;
+  version?: number;
+  versionNonce?: number;
+  updated?: number;
+  isDeleted?: boolean;
+  snapshot?: Record<string, unknown>;
 }
 
 export interface AgentGhostElementOptions {
@@ -38,6 +49,8 @@ export interface AgentGhostElementOptions {
   operation: AgentGhostOperation;
   targetElementId?: string;
   finalElementId?: string;
+  baseRevision?: string;
+  baseElementSnapshot?: AgentProposalBaseElementSnapshot;
   createdAt?: number;
 }
 
@@ -95,6 +108,8 @@ export const createAgentGhostMetadata = ({
   operation,
   targetElementId,
   finalElementId,
+  baseRevision,
+  baseElementSnapshot,
   createdAt = Date.now(),
 }: AgentGhostElementOptions): ExcalidrawAgentGhostElementMetadata => {
   return {
@@ -105,6 +120,8 @@ export const createAgentGhostMetadata = ({
     operation,
     targetElementId,
     finalElementId,
+    baseRevision,
+    baseElementSnapshot,
     createdAt,
   };
 };
@@ -184,6 +201,10 @@ export const getAgentGhostMetadata = (
     operation: metadata.operation as AgentGhostOperation,
     ...(typeof metadata.targetElementId === "string" ? { targetElementId: metadata.targetElementId } : {}),
     ...(typeof metadata.finalElementId === "string" ? { finalElementId: metadata.finalElementId } : {}),
+    ...(typeof metadata.baseRevision === "string" ? { baseRevision: metadata.baseRevision } : {}),
+    ...(isAgentProposalBaseElementSnapshot(metadata.baseElementSnapshot)
+      ? { baseElementSnapshot: metadata.baseElementSnapshot }
+      : {}),
     ...(isRecord(metadata.originalStyle) ? { originalStyle: metadata.originalStyle } : {}),
     createdAt: metadata.createdAt as number,
   };
@@ -199,28 +220,33 @@ export const approveAgentProposal = (
     return false;
   }
 
+  const proposedGhosts = getProposalGhosts(stores.elements, proposalId);
+  if (proposedGhosts.length === 0) {
+    return false;
+  }
+
+  if (proposedGhosts.some(({ metadata }) => metadata.operation !== "add")) {
+    markProposalConflict(stores, proposal, proposalId, now, "unsupported_operation");
+    return false;
+  }
+
+  if (proposedGhosts.some(({ metadata }) => isBaseElementSnapshotStale(stores.elements, metadata))) {
+    markProposalStale(stores, proposal, proposalId, now);
+    return false;
+  }
+
+  if (proposedGhosts.some(({ metadata }) =>
+    typeof metadata.finalElementId === "string" &&
+    hasLiveElementWithId(stores.elements, metadata.finalElementId),
+  )) {
+    markProposalConflict(stores, proposal, proposalId, now, "final_element_id_exists");
+    return false;
+  }
+
   let changed = false;
   stores.elements.doc?.transact(() => {
-    for (const item of stores.elements.toArray()) {
-      const element = item.get("el");
-      const metadata = getAgentGhostMetadata(element);
-      if (!metadata || metadata.proposalId !== proposalId || !isRecord(element)) {
-        continue;
-      }
-
-      if (metadata.operation === "add") {
-        item.set("el", materializeAgentGhostElement(element, metadata, now));
-        changed = true;
-        continue;
-      }
-
-      item.set("el", {
-        ...element,
-        isDeleted: true,
-        updated: now,
-        version: typeof element.version === "number" ? element.version + 1 : 1,
-        versionNonce: Math.floor(Math.random() * 1_000_000),
-      });
+    for (const { item, element, metadata } of proposedGhosts) {
+      item.set("el", materializeAgentGhostElement(element, metadata, now));
       changed = true;
     }
 
@@ -259,25 +285,9 @@ export const rejectAgentProposal = (
 
   let changed = false;
   stores.elements.doc?.transact(() => {
-    for (const item of stores.elements.toArray()) {
-      const element = item.get("el");
-      const metadata = getAgentGhostMetadata(element);
-      if (!metadata || metadata.proposalId !== proposalId || !isRecord(element)) {
-        continue;
-      }
-
-      item.set("el", {
-        ...element,
-        isDeleted: true,
-        updated: now,
-        version: typeof element.version === "number" ? element.version + 1 : 1,
-        versionNonce: Math.floor(Math.random() * 1_000_000),
-      });
+    for (const { item, element } of getProposalGhosts(stores.elements, proposalId)) {
+      item.set("el", markElementDeleted(element, now));
       changed = true;
-    }
-
-    if (!changed) {
-      return;
     }
 
     stores.agentProposals?.set(proposalId, {
@@ -294,9 +304,59 @@ export const rejectAgentProposal = (
       rejectedAt: now,
       updatedAt: now,
     });
+    changed = true;
   });
 
   return changed;
+};
+
+const markProposalConflict = (
+  stores: Pick<ExcalidrawYStores, "elements" | "agentRuns" | "agentProposals">,
+  proposal: Record<string, unknown>,
+  proposalId: string,
+  now: number,
+  conflictReason: string,
+): void => {
+  stores.elements.doc?.transact(() => {
+    stores.agentProposals?.set(proposalId, {
+      ...proposal,
+      status: "conflicted",
+      conflictReason,
+      updatedAt: now,
+    });
+    const runId = typeof proposal.runId === "string" ? proposal.runId : proposalId;
+    const run = stores.agentRuns?.get(runId);
+    stores.agentRuns?.set(runId, {
+      ...(isRecord(run) ? run : {}),
+      status: "conflicted",
+      conflictReason,
+      updatedAt: now,
+    });
+  });
+};
+
+const markProposalStale = (
+  stores: Pick<ExcalidrawYStores, "elements" | "agentRuns" | "agentProposals">,
+  proposal: Record<string, unknown>,
+  proposalId: string,
+  now: number,
+): void => {
+  stores.elements.doc?.transact(() => {
+    stores.agentProposals?.set(proposalId, {
+      ...proposal,
+      status: "stale",
+      staleAt: now,
+      updatedAt: now,
+    });
+    const runId = typeof proposal.runId === "string" ? proposal.runId : proposalId;
+    const run = stores.agentRuns?.get(runId);
+    stores.agentRuns?.set(runId, {
+      ...(isRecord(run) ? run : {}),
+      status: "conflicted",
+      staleAt: now,
+      updatedAt: now,
+    });
+  });
 };
 
 export const summarizeAgentFooterState = (
@@ -346,6 +406,78 @@ const materializeAgentGhostElement = (
   };
 };
 
+const markElementDeleted = (
+  element: Record<string, unknown>,
+  now: number,
+): Record<string, unknown> => {
+  return {
+    ...element,
+    isDeleted: true,
+    updated: now,
+    version: typeof element.version === "number" ? element.version + 1 : 1,
+    versionNonce: Math.floor(Math.random() * 1_000_000),
+  };
+};
+
+const getProposalGhosts = (
+  elements: Y.Array<Y.Map<unknown>>,
+  proposalId: string,
+): { item: Y.Map<unknown>; element: Record<string, unknown>; metadata: ExcalidrawAgentGhostElementMetadata }[] => {
+  return elements.toArray().flatMap((item) => {
+    const element = item.get("el");
+    const metadata = getAgentGhostMetadata(element);
+    if (!metadata || metadata.proposalId !== proposalId || !isRecord(element)) {
+      return [];
+    }
+    return [{ item, element, metadata }];
+  });
+};
+
+const hasLiveElementWithId = (
+  elements: Y.Array<Y.Map<unknown>>,
+  elementId: string,
+): boolean => {
+  return elements.toArray().some((item) => {
+    const element = item.get("el");
+    return isRecord(element) && element.id === elementId && element.isDeleted !== true;
+  });
+};
+
+const isBaseElementSnapshotStale = (
+  elements: Y.Array<Y.Map<unknown>>,
+  metadata: ExcalidrawAgentGhostElementMetadata,
+): boolean => {
+  const snapshot = metadata.baseElementSnapshot;
+  if (!snapshot) {
+    return false;
+  }
+
+  const current = findLiveElementById(elements, snapshot.id);
+  if (!current) {
+    return snapshot.isDeleted !== true;
+  }
+
+  return (
+    (typeof snapshot.version === "number" && current.version !== snapshot.version) ||
+    (typeof snapshot.versionNonce === "number" && current.versionNonce !== snapshot.versionNonce) ||
+    (typeof snapshot.updated === "number" && current.updated !== snapshot.updated) ||
+    (typeof snapshot.isDeleted === "boolean" && current.isDeleted !== snapshot.isDeleted)
+  );
+};
+
+const findLiveElementById = (
+  elements: Y.Array<Y.Map<unknown>>,
+  elementId: string,
+): Record<string, unknown> | null => {
+  for (const item of elements.toArray()) {
+    const element = item.get("el");
+    if (isRecord(element) && element.id === elementId && element.isDeleted !== true) {
+      return element;
+    }
+  }
+  return null;
+};
+
 const stripGhostPrefix = (id: string): string => {
   const parts = id.split(":");
   return parts[0] === "ghost" && parts.length >= 3 ? parts.slice(2).join(":") : id;
@@ -383,6 +515,20 @@ export const readAgentFooterState = (
 
 const isRecord = (value: unknown): value is Record<string, unknown> => {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+};
+
+const isAgentProposalBaseElementSnapshot = (value: unknown): value is AgentProposalBaseElementSnapshot => {
+  if (!isRecord(value) || typeof value.id !== "string") {
+    return false;
+  }
+
+  return (
+    (value.version === undefined || typeof value.version === "number") &&
+    (value.versionNonce === undefined || typeof value.versionNonce === "number") &&
+    (value.updated === undefined || typeof value.updated === "number") &&
+    (value.isDeleted === undefined || typeof value.isDeleted === "boolean") &&
+    (value.snapshot === undefined || isRecord(value.snapshot))
+  );
 };
 
 const getElementOrderKey = (element: Record<string, unknown>): string | null => {
@@ -429,7 +575,13 @@ const isAgentRunStatus = (value: unknown): value is AgentRunStatus => {
 };
 
 const isAgentProposalStatus = (value: unknown): value is AgentProposalStatus => {
-  return value === "proposed" || value === "approved" || value === "rejected" || value === "stale";
+  return (
+    value === "proposed" ||
+    value === "approved" ||
+    value === "rejected" ||
+    value === "stale" ||
+    value === "conflicted"
+  );
 };
 
 const chooseFooterRunStatus = (

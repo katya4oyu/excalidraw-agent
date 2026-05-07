@@ -54,6 +54,8 @@ describe("agent ghost elements", () => {
         operation: "add",
         targetElementId: undefined,
         finalElementId: "shape-1",
+        baseRevision: undefined,
+        baseElementSnapshot: undefined,
         originalStyle: {
           opacity: 100,
           strokeColor: "#000000",
@@ -134,6 +136,83 @@ describe("agent ghost elements", () => {
     assert.equal((agentProposals.get("run-1") as Record<string, unknown>).status, "approved");
   });
 
+  test("conflicts add proposals when final element id already exists", () => {
+    const ydoc = new Y.Doc();
+    const elements = ydoc.getArray<Y.Map<unknown>>("elements");
+    const agentRuns = ydoc.getMap("agentRuns");
+    const agentProposals = ydoc.getMap("agentProposals");
+    const ghost = createAgentGhostElement(
+      { id: "shape-1", type: "rectangle" },
+      { runId: "run-1", operation: "add", finalElementId: "shape-1", createdAt: 123 },
+    );
+
+    appendElements({ elements }, [
+      { id: "shape-1", type: "rectangle", version: 1 },
+      ghost,
+    ]);
+    agentRuns.set("run-1", { status: "proposed" });
+    agentProposals.set("run-1", { status: "proposed", runId: "run-1", proposalId: "run-1" });
+
+    assert.equal(approveAgentProposal({ elements, agentRuns, agentProposals }, "run-1", 456), false);
+
+    assert.equal((agentRuns.get("run-1") as Record<string, unknown>).status, "conflicted");
+    assert.equal((agentRuns.get("run-1") as Record<string, unknown>).conflictReason, "final_element_id_exists");
+    assert.equal((agentProposals.get("run-1") as Record<string, unknown>).status, "conflicted");
+    assert.equal((agentProposals.get("run-1") as Record<string, unknown>).conflictReason, "final_element_id_exists");
+    assert.equal(isAgentGhostElement(elements.toArray()[1]?.get("el")), true);
+  });
+
+  test("marks unsupported update proposals as conflicted", () => {
+    const ydoc = new Y.Doc();
+    const elements = ydoc.getArray<Y.Map<unknown>>("elements");
+    const agentRuns = ydoc.getMap("agentRuns");
+    const agentProposals = ydoc.getMap("agentProposals");
+    const ghost = createAgentGhostElement(
+      { id: "shape-1", type: "rectangle" },
+      { runId: "run-1", operation: "update", targetElementId: "shape-1", createdAt: 123 },
+    );
+
+    appendElements({ elements }, [ghost]);
+    agentRuns.set("run-1", { status: "proposed" });
+    agentProposals.set("run-1", { status: "proposed", runId: "run-1", proposalId: "run-1" });
+
+    assert.equal(approveAgentProposal({ elements, agentRuns, agentProposals }, "run-1", 456), false);
+
+    assert.equal((agentRuns.get("run-1") as Record<string, unknown>).status, "conflicted");
+    assert.equal((agentProposals.get("run-1") as Record<string, unknown>).status, "conflicted");
+    assert.equal((agentProposals.get("run-1") as Record<string, unknown>).conflictReason, "unsupported_operation");
+  });
+
+  test("marks proposals stale when base element snapshot no longer matches", () => {
+    const ydoc = new Y.Doc();
+    const elements = ydoc.getArray<Y.Map<unknown>>("elements");
+    const agentRuns = ydoc.getMap("agentRuns");
+    const agentProposals = ydoc.getMap("agentProposals");
+    const ghost = createAgentGhostElement(
+      { id: "shape-2", type: "rectangle" },
+      {
+        runId: "run-1",
+        operation: "add",
+        finalElementId: "shape-2",
+        baseElementSnapshot: { id: "shape-1", version: 1, versionNonce: 111 },
+        createdAt: 123,
+      },
+    );
+
+    appendElements({ elements }, [
+      { id: "shape-1", type: "rectangle", version: 2, versionNonce: 222 },
+      ghost,
+    ]);
+    agentRuns.set("run-1", { status: "proposed" });
+    agentProposals.set("run-1", { status: "proposed", runId: "run-1", proposalId: "run-1" });
+
+    assert.equal(approveAgentProposal({ elements, agentRuns, agentProposals }, "run-1", 456), false);
+
+    assert.equal((agentRuns.get("run-1") as Record<string, unknown>).status, "conflicted");
+    assert.equal((agentProposals.get("run-1") as Record<string, unknown>).status, "stale");
+    assert.equal((agentProposals.get("run-1") as Record<string, unknown>).staleAt, 456);
+  });
+
   test("rejects proposals by deleting ghost elements", () => {
     const ydoc = new Y.Doc();
     const elements = ydoc.getArray<Y.Map<unknown>>("elements");
@@ -153,6 +232,21 @@ describe("agent ghost elements", () => {
     const [item] = elements.toArray();
     const element = item?.get("el") as Record<string, unknown>;
     assert.equal(element.isDeleted, true);
+    assert.equal((agentRuns.get("run-1") as Record<string, unknown>).status, "rejected");
+    assert.equal((agentProposals.get("run-1") as Record<string, unknown>).status, "rejected");
+  });
+
+  test("rejects proposals even when their ghost elements are already gone", () => {
+    const ydoc = new Y.Doc();
+    const elements = ydoc.getArray<Y.Map<unknown>>("elements");
+    const agentRuns = ydoc.getMap("agentRuns");
+    const agentProposals = ydoc.getMap("agentProposals");
+
+    agentRuns.set("run-1", { status: "proposed" });
+    agentProposals.set("run-1", { status: "proposed", runId: "run-1", proposalId: "run-1" });
+
+    assert.equal(rejectAgentProposal({ elements, agentRuns, agentProposals }, "run-1", 456), true);
+
     assert.equal((agentRuns.get("run-1") as Record<string, unknown>).status, "rejected");
     assert.equal((agentProposals.get("run-1") as Record<string, unknown>).status, "rejected");
   });

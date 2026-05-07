@@ -7,6 +7,7 @@ import { pathToFileURL } from "node:url";
 import * as Y from "yjs";
 import {
   createExcalidrawYMap,
+  createAgentRunRequest,
   createFileId,
   getExcalidrawAgentMetadata,
   normalizeExcalidrawElementPositions,
@@ -128,13 +129,13 @@ export function createApp({
     try {
       await connection.transact((document) => {
         const now = Date.now();
-        document.getMap<Record<string, unknown>>("agentInstructionRequests").set(requestId, {
-          status: "queued",
-          source: "api",
+        document.getMap<Record<string, unknown>>("agentRunRequests").set(requestId, createAgentRunRequest({
+          fileId: file.id,
           prompt,
-          createdAt: now,
-          updatedAt: now,
-        });
+          source: "api",
+          trigger: { type: "api" },
+          now,
+        }) as unknown as Record<string, unknown>);
       });
     } finally {
       await connection.disconnect();

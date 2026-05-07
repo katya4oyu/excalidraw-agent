@@ -126,6 +126,27 @@ describe("agent instruction request trigger", () => {
     assert.equal(runs[0]?.source, "api");
   });
 
+  test("starts an agent from the generic agentRunRequests map", () => {
+    const ydoc = new Y.Doc();
+    ydoc.getMap("agentRunRequests").set("request-1", {
+      schemaVersion: 1,
+      status: "queued",
+      source: "manual",
+      prompt: "キャンバス全体を確認して",
+      fileId: "file-1",
+      trigger: { type: "button" },
+      createdAt: 1,
+      updatedAt: 1,
+    });
+    const agents = new FakeAgentStarter();
+
+    startAgentFromInstructionRequests(ydoc, "file-1", agents);
+
+    assert.equal(agents.enqueues.length, 1);
+    assert.equal(agents.enqueues[0]?.requestId, "request-1");
+    assert.equal(getRequestStatus(ydoc, "request-1"), "running");
+  });
+
   test("marks queued requests stale when the note text changed before the server sees it", () => {
     const ydoc = createInstructionDocument("現在の本文");
     const textId = getTextInstructionId(ydoc);
@@ -411,7 +432,8 @@ function getTextInstructionId(ydoc: Y.Doc): string {
 }
 
 function getRequestStatus(ydoc: Y.Doc, requestId: string): unknown {
-  const request = ydoc.getMap("agentInstructionRequests").get(requestId);
+  const request = ydoc.getMap("agentRunRequests").get(requestId) ??
+    ydoc.getMap("agentInstructionRequests").get(requestId);
   return isRecord(request) ? request.status : undefined;
 }
 

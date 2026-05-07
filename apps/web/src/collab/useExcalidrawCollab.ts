@@ -1,12 +1,16 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
 import { HocuspocusProvider } from "@hocuspocus/provider";
 import {
+  createAgentRunRequest,
+  defaultAgentSettings,
+  createBaseRevisionSnapshot,
   createNoteEmbedElement,
   createNoteRecord,
   getAgentInstructionPrompt,
   getNoteEmbedMetadata,
   insertExcalidrawElements,
   toDocumentName,
+  type AgentSettings,
   type NoteRecord,
   type NoteToParentMessage,
   type ParentToNoteMessage,
@@ -61,6 +65,9 @@ export function useExcalidrawCollab({ fileId, excalidrawElement }: UseExcalidraw
   const viewportStateRef = useRef({ scrollX: 0, scrollY: 0, zoom: 1 });
   const ydocRef = useRef<Y.Doc | null>(null);
   const requestedInstructionPromptsRef = useRef(new Map<string, string>());
+  const autoIdleTimerRef = useRef<number>(0);
+  const lastAutoSceneSignatureRef = useRef<string | null>(null);
+  const suppressNextAutoChangeRef = useRef(false);
   const noteWindowsRef = useRef(new Map<string, Window>());
   const proposalStoresRef = useRef<{
     elements: Y.Array<Y.Map<unknown>>;
@@ -73,6 +80,12 @@ export function useExcalidrawCollab({ fileId, excalidrawElement }: UseExcalidraw
     proposedCount: 0,
     ghostElementCount: 0,
   });
+  const agentFooterStateRef = useRef(agentFooterState);
+  const [agentSettings, setAgentSettings] = useState<AgentSettings>(() => defaultAgentSettings());
+
+  useEffect(() => {
+    agentFooterStateRef.current = agentFooterState;
+  }, [agentFooterState]);
 
   const collabUrl = useMemo(() => {
     if (import.meta.env.VITE_COLLAB_URL) {
@@ -112,6 +125,7 @@ export function useExcalidrawCollab({ fileId, excalidrawElement }: UseExcalidraw
     const yAssets = ydoc.getMap("assets");
     const yAgentRuns = ydoc.getMap("agentRuns");
     const yAgentProposals = ydoc.getMap("agentProposals");
+    const yAgentSettings = ydoc.getMap("agentSettings");
     const yNotes = ydoc.getMap<Record<string, unknown>>("notes");
     proposalStoresRef.current = {
       elements: yElements,
@@ -207,9 +221,19 @@ export function useExcalidrawCollab({ fileId, excalidrawElement }: UseExcalidraw
     const observeNoteState = () => {
       sendAllNoteStates();
     };
+    const emitAgentSettings = () => {
+      const current = readAgentSettings(yAgentSettings);
+      setAgentSettings(current);
+      if (!current.autoModeEnabled && autoIdleTimerRef.current) {
+        window.clearTimeout(autoIdleTimerRef.current);
+        autoIdleTimerRef.current = 0;
+      }
+    };
     window.addEventListener("message", handleNoteMessage);
     yNotes.observe(observeNoteState);
     yAgentRuns.observe(observeNoteState);
+    yAgentSettings.observe(emitAgentSettings);
+    emitAgentSettings();
 
     return () => {
       setBinding(null);
@@ -226,6 +250,11 @@ export function useExcalidrawCollab({ fileId, excalidrawElement }: UseExcalidraw
       });
       yNotes.unobserve(observeNoteState);
       yAgentRuns.unobserve(observeNoteState);
+      yAgentSettings.unobserve(emitAgentSettings);
+      if (autoIdleTimerRef.current) {
+        window.clearTimeout(autoIdleTimerRef.current);
+        autoIdleTimerRef.current = 0;
+      }
       window.removeEventListener("message", handleNoteMessage);
       destroyAgentFooterStateObserver();
       provider.off("status", handleStatus);
@@ -380,22 +409,51 @@ export function useExcalidrawCollab({ fileId, excalidrawElement }: UseExcalidraw
 
   const approveLatestProposal = useCallback(() => {
     const stores = proposalStoresRef.current;
-    if (!stores) {
+    const ydoc = ydocRef.current;
+    if (!stores || !ydoc) {
       return false;
     }
 
+    suppressNextAutoChangeRef.current = true;
     const proposalId = getLatestProposedProposalId(stores.agentProposals);
-    return proposalId ? approveAgentProposal(stores, proposalId) : false;
+    if (!proposalId) {
+      return false;
+    }
+
+    const approved = approveAgentProposal(stores, proposalId);
+    syncRunRequestStatusFromProposal(ydoc, stores.agentProposals, proposalId);
+    return approved;
   }, []);
 
   const rejectLatestProposal = useCallback(() => {
     const stores = proposalStoresRef.current;
-    if (!stores) {
+    const ydoc = ydocRef.current;
+    if (!stores || !ydoc) {
       return false;
     }
 
+    suppressNextAutoChangeRef.current = true;
     const proposalId = getLatestProposedProposalId(stores.agentProposals);
-    return proposalId ? rejectAgentProposal(stores, proposalId) : false;
+    if (!proposalId) {
+      return false;
+    }
+
+    const rejected = rejectAgentProposal(stores, proposalId);
+    syncRunRequestStatusFromProposal(ydoc, stores.agentProposals, proposalId);
+    return rejected;
+  }, []);
+
+  const setAutoModeEnabled = useCallback((enabled: boolean) => {
+    if (!ydocRef.current) {
+      return;
+    }
+
+    const now = Date.now();
+    const settings = ydocRef.current.getMap("agentSettings");
+    settings.set("schemaVersion", 1);
+    settings.set("autoModeEnabled", enabled);
+    settings.set("autoIdleMs", readAutoIdleMs(settings));
+    settings.set("updatedAt", now);
   }, []);
 
   const onChange = useCallback((elements: readonly Record<string, unknown>[], appState: AppState) => {
@@ -418,8 +476,15 @@ export function useExcalidrawCollab({ fileId, excalidrawElement }: UseExcalidraw
     }
 
     restoreManagedNoteLinks(ydocRef.current, fileId, elements);
+    scheduleAutoIdleRunIfNeeded(ydocRef.current, fileId, elements, {
+      agentFooterState: agentFooterStateRef.current,
+      autoIdleTimerRef,
+      lastAutoSceneSignatureRef,
+      suppressNextAutoChangeRef,
+    });
 
-    const requests = ydocRef.current.getMap<Record<string, unknown>>("agentInstructionRequests");
+    const requests = ydocRef.current.getMap<Record<string, unknown>>("agentRunRequests");
+    const legacyRequests = ydocRef.current.getMap<Record<string, unknown>>("agentInstructionRequests");
     for (const element of elements) {
       const prompt = getAgentInstructionPrompt(element);
       const elementId = getElementId(element);
@@ -435,14 +500,19 @@ export function useExcalidrawCollab({ fileId, excalidrawElement }: UseExcalidraw
       }
 
       const now = Date.now();
-      requests.set(elementId, {
-        status: "queued",
-        source: "instruction-note",
+      const request = {
+        ...createAgentRunRequest({
+          fileId,
+          prompt,
+          source: "instruction-note",
+          trigger: { type: "instruction-note" },
+          now,
+        }),
         prompt,
         elementId,
-        createdAt: now,
-        updatedAt: now,
-      });
+      };
+      requests.set(elementId, request);
+      legacyRequests.set(elementId, request);
       requestedInstructionPromptsRef.current.set(elementId, prompt);
     }
   }, [fileId]);
@@ -504,12 +574,14 @@ export function useExcalidrawCollab({ fileId, excalidrawElement }: UseExcalidraw
     api,
     agentPresence,
     agentFooterState,
+    agentSettings,
     binding,
     isAgentInstructionMode,
     onChange,
     onPointerUp,
     approveLatestProposal,
     rejectLatestProposal,
+    setAutoModeEnabled,
     setApi,
     status,
     toggleAgentInstructionMode,
@@ -531,6 +603,188 @@ function getLatestProposedProposalId(agentProposals: Y.Map<unknown>): string | n
   }
 
   return latest?.id ?? null;
+}
+
+function syncRunRequestStatusFromProposal(
+  ydoc: Y.Doc,
+  agentProposals: Y.Map<unknown>,
+  proposalId: string,
+): void {
+  const proposal = agentProposals.get(proposalId);
+  if (!isRecord(proposal)) {
+    return;
+  }
+
+  const requestStatus = toRunRequestStatus(proposal.status);
+  if (!requestStatus) {
+    return;
+  }
+
+  const runId = typeof proposal.runId === "string" ? proposal.runId : proposalId;
+  const now = typeof proposal.updatedAt === "number" ? proposal.updatedAt : Date.now();
+  ydoc.transact(() => {
+    for (const mapName of ["agentRunRequests", "agentInstructionRequests"]) {
+      const requests = ydoc.getMap<Record<string, unknown>>(mapName);
+      for (const [requestId, request] of requests.entries()) {
+        if (!isRecord(request) || request.runId !== runId) {
+          continue;
+        }
+
+        requests.set(requestId, {
+          ...request,
+          status: requestStatus,
+          updatedAt: now,
+        });
+      }
+    }
+  });
+}
+
+function toRunRequestStatus(status: unknown): "applied" | "rejected" | "stale" | "failed" | null {
+  if (status === "approved") {
+    return "applied";
+  }
+  if (status === "rejected" || status === "stale") {
+    return status;
+  }
+  if (status === "conflicted") {
+    return "failed";
+  }
+  return null;
+}
+
+function readAgentSettings(settings: Y.Map<unknown>): AgentSettings {
+  const fallback = defaultAgentSettings();
+  return {
+    schemaVersion: 1,
+    autoModeEnabled: settings.get("autoModeEnabled") === true,
+    autoIdleMs: readAutoIdleMs(settings),
+    updatedAt: typeof settings.get("updatedAt") === "number" ? settings.get("updatedAt") as number : fallback.updatedAt,
+  };
+}
+
+function readAutoIdleMs(settings: Y.Map<unknown>): number {
+  const value = settings.get("autoIdleMs");
+  return typeof value === "number" && value >= 1_000 ? value : 30_000;
+}
+
+function scheduleAutoIdleRunIfNeeded(
+  ydoc: Y.Doc,
+  fileId: string,
+  elements: readonly Record<string, unknown>[],
+  refs: {
+    agentFooterState: AgentFooterState;
+    autoIdleTimerRef: MutableRefObject<number>;
+    lastAutoSceneSignatureRef: MutableRefObject<string | null>;
+    suppressNextAutoChangeRef: MutableRefObject<boolean>;
+  },
+): void {
+  const signature = createHumanSceneSignature(elements);
+  if (refs.lastAutoSceneSignatureRef.current === null) {
+    refs.lastAutoSceneSignatureRef.current = signature;
+    return;
+  }
+
+  if (refs.lastAutoSceneSignatureRef.current === signature) {
+    return;
+  }
+  refs.lastAutoSceneSignatureRef.current = signature;
+
+  if (refs.suppressNextAutoChangeRef.current) {
+    refs.suppressNextAutoChangeRef.current = false;
+    return;
+  }
+
+  const settings = readAgentSettings(ydoc.getMap("agentSettings"));
+  if (!settings.autoModeEnabled || isFooterRunActive(refs.agentFooterState) || hasPendingProposal(refs.agentFooterState)) {
+    return;
+  }
+
+  const requests = ydoc.getMap<Record<string, unknown>>("agentRunRequests");
+  if (hasActiveRunRequest(requests)) {
+    return;
+  }
+
+  if (refs.autoIdleTimerRef.current) {
+    window.clearTimeout(refs.autoIdleTimerRef.current);
+  }
+
+  const changedElementIds = elements
+    .filter((element) => element.isDeleted !== true && typeof element.id === "string" && !isAgentGhostLikeElement(element))
+    .map((element) => String(element.id));
+  refs.autoIdleTimerRef.current = window.setTimeout(() => {
+    refs.autoIdleTimerRef.current = 0;
+    if (hasActiveRunRequest(requests) || isFooterRunActive(refs.agentFooterState) || hasPendingProposal(refs.agentFooterState)) {
+      return;
+    }
+
+    const now = Date.now();
+    const snapshot = createBaseRevisionSnapshot({
+      elements: elements.filter((element) => !isAgentGhostLikeElement(element)),
+      assets: ydoc.getMap("assets").toJSON() as Record<string, unknown>,
+      notes: ydoc.getMap("notes").toJSON() as Record<string, unknown>,
+    });
+    requests.set(`auto-idle-${crypto.randomUUID()}`, createAgentRunRequest({
+      fileId,
+      prompt: [
+        "現在の図を見て、小さな改善proposalを1つ作ってください。",
+        "不要なら変更を作らず、その理由だけを述べてください。",
+        "大規模な再構成は避け、add中心の提案にしてください。",
+      ].join("\n"),
+      source: "auto-idle",
+      trigger: {
+        type: "idle-after-edit",
+        idleMs: settings.autoIdleMs,
+        changedElementIds,
+      },
+      baseRevision: snapshot.hash,
+      now,
+    }) as unknown as Record<string, unknown>);
+  }, settings.autoIdleMs);
+}
+
+function createHumanSceneSignature(elements: readonly Record<string, unknown>[]): string {
+  return JSON.stringify(
+    elements
+      .filter((element) => element.isDeleted !== true && typeof element.id === "string" && !isAgentGhostLikeElement(element))
+      .map((element) => ({
+        id: element.id,
+        version: element.version,
+        versionNonce: element.versionNonce,
+        updated: element.updated,
+        x: element.x,
+        y: element.y,
+        width: element.width,
+        height: element.height,
+      }))
+      .sort((a, b) => String(a.id).localeCompare(String(b.id))),
+  );
+}
+
+function hasActiveRunRequest(requests: Y.Map<Record<string, unknown>>): boolean {
+  for (const request of requests.values()) {
+    if (isRecord(request) && (request.status === "queued" || request.status === "running" || request.status === "proposed")) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function hasPendingProposal(agent: AgentFooterState): boolean {
+  return agent.proposedCount > 0 || agent.ghostElementCount > 0 || agent.runStatus === "proposed";
+}
+
+function isFooterRunActive(agent: AgentFooterState): boolean {
+  return agent.activeRunCount > 0 || agent.runStatus === "queued" || agent.runStatus === "running" || agent.runStatus === "applying";
+}
+
+function isAgentGhostLikeElement(element: Record<string, unknown>): boolean {
+  const customData = element.customData;
+  if (!isRecord(customData)) {
+    return false;
+  }
+  const metadata = customData.excalidrawAgent;
+  return isRecord(metadata) && metadata.schemaVersion === 1 && metadata.kind === "ghost";
 }
 
 function clamp(value: number, min: number, max: number): number {
@@ -689,7 +943,9 @@ function readNoteState(ydoc: Y.Doc, fileId: string, noteId: string): NoteRecord 
   }
 
   const request = typeof note.requestId === "string"
-    ? ydoc.getMap<Record<string, unknown>>("agentInstructionRequests").get(note.requestId) ?? null
+    ? ydoc.getMap<Record<string, unknown>>("agentRunRequests").get(note.requestId) ??
+      ydoc.getMap<Record<string, unknown>>("agentInstructionRequests").get(note.requestId) ??
+      null
     : null;
   const runId = typeof note.runId === "string"
     ? note.runId

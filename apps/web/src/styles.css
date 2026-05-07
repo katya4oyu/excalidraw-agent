@@ -275,6 +275,14 @@ body {
   background: #d32f2f;
 }
 
+.agent-footer-tools__text {
+  max-width: 11rem;
+  overflow: hidden;
+  color: var(--text-secondary-color);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .agent-footer-tools__separator {
   width: 1px;
   height: 1.5rem;

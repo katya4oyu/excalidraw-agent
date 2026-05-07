@@ -1,5 +1,5 @@
 import { HocuspocusProvider } from "@hocuspocus/provider";
-import { cpSync, existsSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, rmSync, symlinkSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import * as Y from "yjs";
@@ -11,6 +11,7 @@ import type {
 } from "@excalidraw-agent/shared";
 import { getNoteText, toDocumentName } from "@excalidraw-agent/shared";
 import { publishGhostProposal } from "@excalidraw-agent/y-excalidraw-agent";
+import { buildPrompt, derivedPatchFileName, readFinalProposal, writeRunSnapshot } from "./proposalPipeline.ts";
 import { createTypeScriptSdkCodexRuntime } from "./runtime.ts";
 import type { CodexRuntime, CodexRuntimeEvent } from "./runtime.ts";
 
@@ -83,13 +84,14 @@ async function runDaemon(options: AgentWorkerOptions): Promise<void> {
 
     try {
       let codexError: string | undefined;
+      let finalArtifactError: string | undefined;
       presence?.update("キャンバスを同期し、現在の要素とNoteを読み込んでいます");
-      const snapshotPath = collab ? writeRunSnapshot(workspace, collab.document, request) : undefined;
+      const snapshot = collab ? writeRunSnapshot(workspace, collab.document, request) : undefined;
       presence?.update("base-scene.json を保存しました");
       if (runtime) {
         try {
           const result = await runtime.run({
-            prompt: buildPrompt(options, request.prompt, request, snapshotPath),
+            prompt: buildPrompt(options, request.prompt, request, snapshot?.snapshotPath),
             onEvent: (event) => {
               handleRuntimeEvent(event, presence);
             },
@@ -103,7 +105,30 @@ async function runDaemon(options: AgentWorkerOptions): Promise<void> {
           presence?.update("Codex が失敗したため、Worker fallback proposal を作成します");
         }
       }
-      const proposedElements = collab ? createDemoProposalElements(collab.document, request) : [];
+      let proposedElements: Record<string, unknown>[] = [];
+      let derivedPatch: { baseRevision: string; operations: unknown[]; unsupportedCount: number } | undefined;
+      let finalArtifactPath: string | undefined;
+      let usedFallbackProposal = false;
+      if (collab && snapshot) {
+        const finalProposal = readFinalProposal(snapshot);
+        finalArtifactPath = finalProposal.finalArtifactPath;
+        if (finalProposal.status === "loaded") {
+          proposedElements = finalProposal.proposal.proposedElements;
+          derivedPatch = finalProposal.proposal.patch;
+          presence?.update(
+            `final.excalidraw から add proposal を生成しました (${proposedElements.length} elements)`,
+          );
+        } else {
+          usedFallbackProposal = true;
+          if (finalProposal.status === "unreadable") {
+            finalArtifactError = finalProposal.error;
+            presence?.update("final.excalidraw を読めないため、Worker fallback proposal を作成します");
+          } else {
+            presence?.update("final.excalidraw がないため、Worker fallback proposal を作成します");
+          }
+          proposedElements = createDemoProposalElements(collab.document, request);
+        }
+      }
       collab?.document.transact(() => {
         const finishedAt = Date.now();
         if (proposedElements.length > 0) {
@@ -117,13 +142,23 @@ async function runDaemon(options: AgentWorkerOptions): Promise<void> {
               runId: request.runId,
               elements: proposedElements,
               operation: "add",
+              baseRevision: snapshot?.baseRevision,
               createdAt: finishedAt,
             },
           );
           writeRunStatus(collab.document, request.runId, {
             requestId: request.requestId,
             prompt: request.prompt,
+            baseRevision: snapshot?.baseRevision,
+            finalArtifactPath,
+            ...(derivedPatch ? {
+              derivedPatchPath: snapshot ? join(snapshot.runDirectory, derivedPatchFileName) : undefined,
+              derivedPatchOperationCount: derivedPatch.operations.length,
+              unsupportedOperationCount: derivedPatch.unsupportedCount,
+            } : {}),
+            ...(usedFallbackProposal ? { proposalSource: "worker-fallback-demo" } : { proposalSource: "codex-final-artifact" }),
             ...(codexError ? { codexError } : {}),
+            ...(finalArtifactError ? { finalArtifactError } : {}),
             finishedAt,
             updatedAt: finishedAt,
             ghostElementIds,
@@ -133,7 +168,16 @@ async function runDaemon(options: AgentWorkerOptions): Promise<void> {
             status: "proposed",
             requestId: request.requestId,
             prompt: request.prompt,
+            baseRevision: snapshot?.baseRevision,
+            finalArtifactPath,
+            ...(derivedPatch ? {
+              derivedPatchPath: snapshot ? join(snapshot.runDirectory, derivedPatchFileName) : undefined,
+              derivedPatchOperationCount: derivedPatch.operations.length,
+              unsupportedOperationCount: derivedPatch.unsupportedCount,
+            } : {}),
+            ...(usedFallbackProposal ? { proposalSource: "worker-fallback-demo" } : { proposalSource: "codex-final-artifact" }),
             ...(codexError ? { codexError } : {}),
+            ...(finalArtifactError ? { finalArtifactError } : {}),
             finishedAt,
             updatedAt: finishedAt,
           });
@@ -285,50 +329,6 @@ function readFlag(args: string[], flag: string): string | undefined {
   return index >= 0 ? args[index + 1] : undefined;
 }
 
-function buildPrompt(
-  options: AgentWorkerOptions,
-  prompt = options.prompt,
-  request?: AgentRunQueueRequest,
-  snapshotPath?: string,
-): string {
-  return [
-    `対象ファイルID: ${options.fileId}`,
-    request ? `Agent run ID: ${request.runId}` : "",
-    request ? `Instruction request ID: ${request.requestId}` : "",
-    snapshotPath ? `同期済みキャンバス snapshot: ${snapshotPath}` : "",
-    "",
-    "この作業スペースの AGENTS.md を読み、Excalidraw作業では .agents/skills/excalidraw-skill/SKILL.md を使ってください。",
-    "MCP tools が使えない場合は、skill の REST API mode または付属 scripts を使ってください。",
-    ".excalidraw ファイルはこの作業スペース内に作成してください。",
-    snapshotPath ? "作業開始時には必ず snapshot JSON を読み、現在の canvas 要素・notes・agentRuns を確認してください。" : "",
-    "",
-    prompt ?? "現在はセットアップ確認として、利用できる作業手順を短く確認してください。",
-  ].filter((line, index) => line || index > 2).join("\n");
-}
-
-function writeRunSnapshot(workspace: string, document: Y.Doc, request: AgentRunQueueRequest): string {
-  const runsDirectory = join(workspace, "runs", request.runId);
-  mkdirSync(runsDirectory, { recursive: true });
-
-  const snapshotPath = join(runsDirectory, "base-scene.json");
-  writeFileSync(
-    snapshotPath,
-    JSON.stringify({
-      fileId: request.fileId,
-      requestId: request.requestId,
-      runId: request.runId,
-      prompt: request.prompt,
-      capturedAt: new Date().toISOString(),
-      elements: document.getArray<Y.Map<unknown>>("elements").toArray().map((item) => item.get("el")),
-      assets: document.getMap("assets").toJSON(),
-      notes: document.getMap("notes").toJSON(),
-      agentRuns: document.getMap("agentRuns").toJSON(),
-      agentProposals: document.getMap("agentProposals").toJSON(),
-    }, null, 2),
-  );
-  return snapshotPath;
-}
-
 function writeRunStatus(document: Y.Doc, runId: string, patch: Record<string, unknown>): void {
   const agentRuns = document.getMap<Record<string, unknown>>("agentRuns");
   const current = agentRuns.get(runId);
@@ -339,12 +339,17 @@ function writeRunStatus(document: Y.Doc, runId: string, patch: Record<string, un
 }
 
 function writeRequestStatus(document: Y.Doc, requestId: string, patch: Record<string, unknown>): void {
-  const requests = document.getMap<Record<string, unknown>>("agentInstructionRequests");
-  const current = requests.get(requestId);
-  requests.set(requestId, {
-    ...(isRecord(current) ? current : {}),
-    ...patch,
-  });
+  for (const mapName of ["agentRunRequests", "agentInstructionRequests"]) {
+    const requests = document.getMap<Record<string, unknown>>(mapName);
+    const current = requests.get(requestId);
+    if (!current && mapName === "agentInstructionRequests") {
+      continue;
+    }
+    requests.set(requestId, {
+      ...(isRecord(current) ? current : {}),
+      ...patch,
+    });
+  }
 }
 
 function startAgentPresence(
