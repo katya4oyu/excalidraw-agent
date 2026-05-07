@@ -45,9 +45,24 @@ and keep the issue as decision history.
 - Use the portless tasks for browser-facing verification by default:
   - `mise run server:portless`
   - `mise run web:portless`
+- A feature is not complete if it was only verified with raw `localhost`
+  commands or direct `/files/:id` URLs. Before reporting completion for
+  browser-facing work, actually start the app with the `mise` portless tasks
+  above and verify the user entrypoint `http://excalidraw-agent.localhost:1355`.
 - Prefer the portless URLs over raw localhost URLs:
   - web: `http://excalidraw-agent.localhost:1355`
   - API: `http://api.excalidraw-agent.localhost:1355`
+- Browser verification must follow the real user flow for the feature being
+  changed. Do not stop at server startup, page load, root-to-`/files/:id`
+  navigation, `Collab: synced`, or `worker ready` unless that is the entire
+  feature. Continue through the user-visible behavior that the change claims to
+  implement, including the relevant trigger, UI state, network/WebSocket path,
+  Worker lifecycle, generated artifact, proposal, Approve/Reject, or error
+  handling path.
+- For Agent/Worker features, the minimum browser verification is: open the web
+  root, confirm it creates or loads a file and navigates to `/files/:id`,
+  confirm `Collab: synced`, confirm the footer shows `worker ready`, and then
+  exercise the specific feature's end-to-end behavior.
 - Before starting another dev server, check for existing listeners and avoid multiple Vite/server instances for the same app. If an old instance is stale or conflicting, stop it instead of starting a new one.
 - If the Portless proxy is not running, start the HTTP proxy with `pnpm dlx portless proxy start --port 1355 --no-tls` before running the portless tasks.
 - Use raw `mise run web` / `mise run server` only for narrow debugging, and explain why portless is not being used.

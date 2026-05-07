@@ -189,7 +189,10 @@ type AgentRunRequest = {
 - `mise run typecheck`が成功する。
 - `mise run test`が成功する。
 - Worker trigger、auto idle debounce、proposal approve/reject、Codex status APIについて自動テストがある。
-- ブラウザでmanual Run、Auto mode OFF、Auto mode ONの30秒idle trigger、proposal Approve、proposal Rejectが確認できる。
+- ブラウザ検証は必ず実際の起動方法で行う。`mise run server:portless`と`mise run web:portless`で起動し、`http://excalidraw-agent.localhost:1355`のrootから実ユーザーフローを開始する。raw `localhost`起動や`/files/:id`直開きだけでは完了扱いにしない。
+- 検証は起動、page load、rootから`/files/:id`への遷移、`Collab: synced`、footerの`worker ready`だけで止めない。変更が実装したと主張する機能について、該当するtrigger、UI状態、network/WebSocket経路、Worker lifecycle、生成artifact、proposal、Approve/Reject、エラー表示まで、ユーザーが使う一連の動作を通す。
+- Agent/Worker機能では、最低限`/files/:id`で`Collab: synced`とfooterの`worker ready`を確認した上で、manual Run、Auto mode OFF、Auto mode ONの30秒idle trigger、proposal Approve、proposal Rejectのうち、その変更に関係するものを最後まで確認する。
+- `http://api.excalidraw-agent.localhost:1355/api/codex/status`が404ではなくCodex status JSONを返し、`ws://api.excalidraw-agent.localhost:1355/collab`へのWebSocket接続がブラウザconsoleで失敗していないことを確認する。
 - 検証用スクリーンショットなどの一時成果物はリポジトリ外に置かれる。
 
 ## SDK and App Server Investigation Plan
