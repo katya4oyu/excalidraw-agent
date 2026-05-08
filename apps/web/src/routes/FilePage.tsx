@@ -245,7 +245,7 @@ function AgentPresenceOverlay({
     zoom: number;
   };
 }) {
-  if (!presence) {
+  if (!presence || presence.status !== "running") {
     return null;
   }
 

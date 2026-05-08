@@ -41,9 +41,9 @@ describe("agent ghost elements", () => {
     );
 
     assert.equal(element.id, "ghost:run-1:shape-1");
-    assert.equal(element.opacity, 35);
-    assert.equal(element.strokeColor, "#1e88e5");
-    assert.equal(element.strokeStyle, "dashed");
+    assert.equal(element.opacity, 48);
+    assert.equal(element.strokeColor, "#000000");
+    assert.equal(element.strokeStyle, undefined);
     assert.equal(element.locked, true);
     assert.deepEqual(element.customData, {
       excalidrawAgent: {

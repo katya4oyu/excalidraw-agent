@@ -1,6 +1,7 @@
 import {
   appendElements,
   createAgentGhostElement,
+  getAgentGhostMetadata,
   type AgentProposalBaseElementSnapshot,
   type AgentGhostElementOptions,
   type AgentRunStatus,
@@ -23,6 +24,15 @@ export interface PublishGhostProposalInput {
   baseRevision?: string;
   baseElementSnapshots?: AgentProposalBaseElementSnapshot[];
   baseElements?: Record<string, unknown>[];
+  createdAt?: number;
+  source?: "codex-final-artifact" | "codex-step-draft" | string;
+}
+
+export interface PublishGhostDraftInput {
+  runId: string;
+  stepIndex: number;
+  elements: Record<string, unknown>[];
+  baseRevision?: string;
   createdAt?: number;
 }
 
@@ -72,11 +82,86 @@ export const publishGhostProposal = (
     ghostElementIds,
     baseRevision: input.baseRevision,
     baseElementSnapshots,
+    source: input.source ?? "codex-final-artifact",
     createdAt,
   });
 
   return ghostElementIds;
 };
+
+export const publishGhostDraft = (
+  stores: Pick<ExcalidrawYStores, "elements" | "agentRuns">,
+  input: PublishGhostDraftInput,
+): string[] => {
+  const proposalId = draftProposalId(input.runId);
+  removeAgentGhostsForProposal(stores, proposalId);
+
+  const createdAt = input.createdAt ?? Date.now();
+  const ghostElements = input.elements.map((element) =>
+    createAgentGhostElement(element, {
+      runId: input.runId,
+      proposalId,
+      operation: "add",
+      finalElementId: typeof element.id === "string" ? element.id : undefined,
+      baseRevision: input.baseRevision,
+      createdAt,
+    })
+  );
+  const ghostElementIds = ghostElements.map((element) => String(element.id));
+
+  appendElements(stores, ghostElements);
+  stores.agentRuns?.set(input.runId, {
+    ...(stores.agentRuns.get(input.runId) as Record<string, unknown> | undefined),
+    phase: "drafting",
+    draftStepIndex: input.stepIndex,
+    draftGhostElementIds: ghostElementIds,
+    updatedAt: createdAt,
+  });
+  return ghostElementIds;
+};
+
+export const removeAgentGhostsForProposal = (
+  stores: Pick<ExcalidrawYStores, "elements">,
+  proposalId: string,
+  now = Date.now(),
+): number => {
+  let removed = 0;
+  for (const item of stores.elements.toArray()) {
+    const element = item.get("el");
+    const metadata = getAgentGhostMetadata(element);
+    if (!metadata || metadata.proposalId !== proposalId || !isRecord(element)) {
+      continue;
+    }
+    item.set("el", {
+      ...element,
+      isDeleted: true,
+      updated: now,
+      version: typeof element.version === "number" ? element.version + 1 : 1,
+      versionNonce: Math.floor(Math.random() * 1_000_000),
+    });
+    removed += 1;
+  }
+  return removed;
+};
+
+export const removeGhostDraft = (
+  stores: Pick<ExcalidrawYStores, "elements" | "agentRuns">,
+  runId: string,
+  now = Date.now(),
+): number => {
+  const removed = removeAgentGhostsForProposal(stores, draftProposalId(runId), now);
+  const current = stores.agentRuns?.get(runId);
+  if (stores.agentRuns && isRecord(current)) {
+    stores.agentRuns.set(runId, {
+      ...current,
+      draftGhostElementIds: [],
+      updatedAt: now,
+    });
+  }
+  return removed;
+};
+
+const draftProposalId = (runId: string): string => `draft:${runId}`;
 
 const createBaseElementSnapshot = (element: Record<string, unknown>): AgentProposalBaseElementSnapshot => {
   return {
@@ -106,3 +191,6 @@ const pickBaseElementSnapshot = (
     snapshots[index]
   );
 };
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);

@@ -63,31 +63,19 @@ export interface AgentFooterState {
 
 export const agentGhostStyleByOperation = {
   add: {
-    opacity: 35,
-    strokeColor: "#1e88e5",
-    backgroundColor: "transparent",
-    strokeStyle: "dashed",
+    opacity: 48,
     locked: true,
   },
   update: {
-    opacity: 35,
-    strokeColor: "#1e88e5",
-    backgroundColor: "transparent",
-    strokeStyle: "dashed",
+    opacity: 48,
     locked: true,
   },
   delete: {
-    opacity: 30,
-    strokeColor: "#d32f2f",
-    backgroundColor: "transparent",
-    strokeStyle: "dashed",
+    opacity: 35,
     locked: true,
   },
   move: {
-    opacity: 35,
-    strokeColor: "#1e88e5",
-    backgroundColor: "transparent",
-    strokeStyle: "dashed",
+    opacity: 48,
     locked: true,
   },
 } as const satisfies Record<AgentGhostOperation, Record<string, unknown>>;

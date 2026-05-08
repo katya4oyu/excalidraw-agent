@@ -10,8 +10,25 @@ import type {
   AgentWorkerResponseMessage,
 } from "@excalidraw-agent/shared";
 import { getNoteText, toDocumentName } from "@excalidraw-agent/shared";
-import { publishGhostProposal } from "@excalidraw-agent/y-excalidraw-agent";
-import { buildPrompt, derivedPatchFileName, readFinalProposal, writeRunSnapshot } from "./proposalPipeline.ts";
+import { publishGhostDraft, publishGhostProposal, removeGhostDraft } from "@excalidraw-agent/y-excalidraw-agent";
+import {
+  appendHumanDelta,
+  assessFinalProposal,
+  buildDraftStepPrompt,
+  buildEstimatePrompt,
+  buildFinalPrompt,
+  buildPrompt,
+  derivedPatchFileName,
+  readDraftStepProposal,
+  readEstimate,
+  readFinalProposal,
+  resolvePlannedArea,
+  updateSnapshotPlannedArea,
+  writeQualityReport,
+  writeRunSnapshot,
+  type HumanDelta,
+  type PlannedArea,
+} from "./proposalPipeline.ts";
 import { createTypeScriptSdkCodexRuntime } from "./runtime.ts";
 import type { CodexRuntime, CodexRuntimeEvent } from "./runtime.ts";
 
@@ -72,10 +89,11 @@ async function runDaemon(options: AgentWorkerOptions): Promise<void> {
 
     running = true;
     sendToParent({ type: "runStarted", fileId: options.fileId, runId: request.runId });
-    const presence = collab ? startAgentPresence(collab.provider, collab.document, request) : null;
+    let presence: ReturnType<typeof startAgentPresence> | null = null;
     collab?.document.transact(() => {
       writeRunStatus(collab.document, request.runId, {
         status: "running",
+        phase: "estimating",
         requestId: request.requestId,
         prompt: request.prompt,
         updatedAt: Date.now(),
@@ -84,104 +102,159 @@ async function runDaemon(options: AgentWorkerOptions): Promise<void> {
 
     try {
       let codexError: string | undefined;
-      let finalArtifactError: string | undefined;
-      presence?.update("キャンバスを同期し、現在の要素とNoteを読み込んでいます");
-      const snapshot = collab ? writeRunSnapshot(workspace, collab.document, request) : undefined;
-      presence?.update("base-scene.json を保存しました");
-      if (runtime) {
-        try {
-          const result = await runtime.run({
-            prompt: buildPrompt(options, request.prompt, request, snapshot?.snapshotPath),
-            onEvent: (event) => {
-              handleRuntimeEvent(event, presence);
-            },
+      let codexFinalResponse: string | undefined;
+      if (!collab) {
+        throw new Error("Worker collab connection is not available");
+      }
+      if (!runtime) {
+        throw new Error("Codex runtime is not available");
+      }
+
+      let snapshot = writeRunSnapshot(workspace, collab.document, request);
+      const humanDeltas: HumanDelta[] = [];
+      const runCodexTurn = async (phase: string, prompt: string): Promise<void> => {
+        const before = captureHumanSceneState(collab.document);
+        writeRunStatus(collab.document, request.runId, {
+          phase,
+          humanDeltaCount: humanDeltas.length,
+          updatedAt: Date.now(),
+        });
+        const result = await runtime.run({
+          prompt,
+          onEvent: (event) => {
+            handleRuntimeEvent(event, presence);
+          },
+        });
+        const delta = diffHumanSceneState(before, captureHumanSceneState(collab.document));
+        if (delta) {
+          humanDeltas.push(delta);
+          appendHumanDelta(snapshot, delta);
+        }
+        if (result.finalResponse) {
+          codexFinalResponse = result.finalResponse;
+          console.log(result.finalResponse);
+        }
+      };
+
+      await runCodexTurn("estimating", buildEstimatePrompt(options, request, snapshot));
+      const estimate = readEstimate(snapshot, readVisibleElements(collab.document));
+      const plannedArea = resolvePlannedArea(estimate, readVisibleElements(collab.document));
+      snapshot = updateSnapshotPlannedArea(snapshot, plannedArea);
+      presence = startAgentPresence(collab.provider, request, plannedArea);
+      presence.update("Codex見積もりから描画予定領域を確定しました");
+      writeRunStatus(collab.document, request.runId, {
+        phase: "planning",
+        plannedArea,
+        estimate,
+        humanDeltaCount: humanDeltas.length,
+        updatedAt: Date.now(),
+      });
+
+      for (const [stepIndex, step] of estimate.steps.entries()) {
+        presence.update(`draft step ${stepIndex + 1}/${estimate.steps.length}: ${step.title}`);
+        await runCodexTurn("drafting", buildDraftStepPrompt({
+          options,
+          request,
+          snapshot,
+          estimate,
+          step,
+          stepIndex,
+          humanDeltas,
+        }));
+        const draftProposal = readDraftStepProposal(snapshot, stepIndex);
+        if (draftProposal.status === "loaded" && draftProposal.proposal.proposedElements.length > 0) {
+          collab.document.transact(() => {
+            publishGhostDraft(
+              {
+                elements: collab.document.getArray<Y.Map<unknown>>("elements"),
+                agentRuns: collab.document.getMap("agentRuns"),
+              },
+              {
+                runId: request.runId,
+                stepIndex,
+                elements: draftProposal.proposal.proposedElements,
+                baseRevision: snapshot.baseRevision,
+              },
+            );
+            writeRunStatus(collab.document, request.runId, {
+              phase: "drafting",
+              humanDeltaCount: humanDeltas.length,
+              updatedAt: Date.now(),
+            });
           });
-          if (result.finalResponse) {
-            console.log(result.finalResponse);
-          }
-        } catch (error) {
-          codexError = error instanceof Error ? error.message : String(error);
-          console.error(`Codex run failed; publishing fallback proposal: ${codexError}`);
-          presence?.update("Codex が失敗したため、Worker fallback proposal を作成します");
         }
       }
-      let proposedElements: Record<string, unknown>[] = [];
-      let derivedPatch: { baseRevision: string; operations: unknown[]; unsupportedCount: number } | undefined;
-      let finalArtifactPath: string | undefined;
-      let usedFallbackProposal = false;
-      if (collab && snapshot) {
-        const finalProposal = readFinalProposal(snapshot);
-        finalArtifactPath = finalProposal.finalArtifactPath;
-        if (finalProposal.status === "loaded") {
-          proposedElements = finalProposal.proposal.proposedElements;
-          derivedPatch = finalProposal.proposal.patch;
-          presence?.update(
-            `final.excalidraw から add proposal を生成しました (${proposedElements.length} elements)`,
-          );
-        } else {
-          usedFallbackProposal = true;
-          if (finalProposal.status === "unreadable") {
-            finalArtifactError = finalProposal.error;
-            presence?.update("final.excalidraw を読めないため、Worker fallback proposal を作成します");
-          } else {
-            presence?.update("final.excalidraw がないため、Worker fallback proposal を作成します");
-          }
-          proposedElements = createDemoProposalElements(collab.document, request);
-        }
+
+      presence.update("final.excalidraw を作成し、品質チェックを行います");
+      await runCodexTurn("verifying", buildFinalPrompt({ options, request, snapshot, estimate, humanDeltas }));
+      let finalProposal = readFinalProposal(snapshot);
+      let qualityReport = assessFinalProposal(snapshot, finalProposal, false);
+      writeQualityReport(snapshot, qualityReport);
+      if (qualityReport.status === "failed") {
+        presence.update("品質チェックに失敗したため、Codexに1回だけ修正させます");
+        await runCodexTurn("verifying", buildFinalPrompt({
+          options,
+          request,
+          snapshot,
+          estimate,
+          humanDeltas,
+          refineFrom: qualityReport,
+        }));
+        finalProposal = readFinalProposal(snapshot);
+        qualityReport = assessFinalProposal(snapshot, finalProposal, true);
+        writeQualityReport(snapshot, qualityReport);
       }
+      if (qualityReport.status !== "passed" || finalProposal.status !== "loaded") {
+        throw new Error(`Final proposal quality check failed: ${qualityReport.messages.join("; ")}`);
+      }
+
+      const proposedElements = finalProposal.proposal.proposedElements;
+      const derivedPatch = finalProposal.proposal.patch;
+      const finalArtifactPath = finalProposal.finalArtifactPath;
       collab?.document.transact(() => {
         const finishedAt = Date.now();
-        if (proposedElements.length > 0) {
-          const ghostElementIds = publishGhostProposal(
-            {
-              elements: collab.document.getArray<Y.Map<unknown>>("elements"),
-              agentRuns: collab.document.getMap("agentRuns"),
-              agentProposals: collab.document.getMap("agentProposals"),
-            },
-            {
-              runId: request.runId,
-              elements: proposedElements,
-              operation: "add",
-              baseRevision: snapshot?.baseRevision,
-              createdAt: finishedAt,
-            },
-          );
-          writeRunStatus(collab.document, request.runId, {
-            requestId: request.requestId,
-            prompt: request.prompt,
-            baseRevision: snapshot?.baseRevision,
-            finalArtifactPath,
-            ...(derivedPatch ? {
-              derivedPatchPath: snapshot ? join(snapshot.runDirectory, derivedPatchFileName) : undefined,
-              derivedPatchOperationCount: derivedPatch.operations.length,
-              unsupportedOperationCount: derivedPatch.unsupportedCount,
-            } : {}),
-            ...(usedFallbackProposal ? { proposalSource: "worker-fallback-demo" } : { proposalSource: "codex-final-artifact" }),
-            ...(codexError ? { codexError } : {}),
-            ...(finalArtifactError ? { finalArtifactError } : {}),
-            finishedAt,
-            updatedAt: finishedAt,
-            ghostElementIds,
-          });
-        } else {
-          writeRunStatus(collab.document, request.runId, {
-            status: "proposed",
-            requestId: request.requestId,
-            prompt: request.prompt,
-            baseRevision: snapshot?.baseRevision,
-            finalArtifactPath,
-            ...(derivedPatch ? {
-              derivedPatchPath: snapshot ? join(snapshot.runDirectory, derivedPatchFileName) : undefined,
-              derivedPatchOperationCount: derivedPatch.operations.length,
-              unsupportedOperationCount: derivedPatch.unsupportedCount,
-            } : {}),
-            ...(usedFallbackProposal ? { proposalSource: "worker-fallback-demo" } : { proposalSource: "codex-final-artifact" }),
-            ...(codexError ? { codexError } : {}),
-            ...(finalArtifactError ? { finalArtifactError } : {}),
-            finishedAt,
-            updatedAt: finishedAt,
-          });
-        }
+        removeGhostDraft(
+          {
+            elements: collab.document.getArray<Y.Map<unknown>>("elements"),
+            agentRuns: collab.document.getMap("agentRuns"),
+          },
+          request.runId,
+          finishedAt,
+        );
+        const ghostElementIds = publishGhostProposal(
+          {
+            elements: collab.document.getArray<Y.Map<unknown>>("elements"),
+            agentRuns: collab.document.getMap("agentRuns"),
+            agentProposals: collab.document.getMap("agentProposals"),
+          },
+          {
+            runId: request.runId,
+            elements: proposedElements,
+            operation: "add",
+            baseRevision: snapshot.baseRevision,
+            source: "codex-final-artifact",
+            createdAt: finishedAt,
+          },
+        );
+        writeRunStatus(collab.document, request.runId, {
+          phase: "proposed",
+          requestId: request.requestId,
+          prompt: request.prompt,
+          baseRevision: snapshot.baseRevision,
+          plannedArea,
+          humanDeltaCount: humanDeltas.length,
+          finalArtifactPath,
+          derivedPatchPath: join(snapshot.runDirectory, derivedPatchFileName),
+          derivedPatchOperationCount: derivedPatch.operations.length,
+          unsupportedOperationCount: derivedPatch.unsupportedCount,
+          proposalSource: "codex-final-artifact",
+          qualityReportPath: join(snapshot.runDirectory, "quality-report.json"),
+          ...(codexError ? { codexError } : {}),
+          ...(codexFinalResponse ? { codexFinalResponse } : {}),
+          finishedAt,
+          updatedAt: finishedAt,
+          ghostElementIds,
+        });
         writeRequestStatus(collab.document, request.requestId, {
           status: "proposed",
           runId: request.runId,
@@ -193,8 +266,17 @@ async function runDaemon(options: AgentWorkerOptions): Promise<void> {
     } catch (error) {
       collab?.document.transact(() => {
         const finishedAt = Date.now();
+        removeGhostDraft(
+          {
+            elements: collab.document.getArray<Y.Map<unknown>>("elements"),
+            agentRuns: collab.document.getMap("agentRuns"),
+          },
+          request.runId,
+          finishedAt,
+        );
         writeRunStatus(collab.document, request.runId, {
           status: "failed",
+          phase: "failed",
           requestId: request.requestId,
           prompt: request.prompt,
           error: error instanceof Error ? error.message : String(error),
@@ -354,15 +436,14 @@ function writeRequestStatus(document: Y.Doc, requestId: string, patch: Record<st
 
 function startAgentPresence(
   provider: HocuspocusProvider,
-  document: Y.Doc,
   request: AgentRunQueueRequest,
+  area: PlannedArea,
 ): {
   finish(message: string, status: "proposed" | "failed"): void;
   stop(): void;
   update(message: string): void;
 } {
   const awareness = provider.awareness;
-  const area = chooseAgentPlannedArea(document);
   const logs: string[] = [];
   let step = 0;
   let stopped = false;
@@ -425,12 +506,13 @@ function startAgentPresence(
       clearInterval(timer);
       awareness?.setLocalStateField("pointer", null);
       awareness?.setLocalStateField("button", "up");
+      awareness?.setLocalStateField("agentPresence", null);
     },
     update,
   };
 }
 
-function chooseAgentPlannedArea(document: Y.Doc): { x: number; y: number; width: number; height: number } {
+function chooseAgentPlannedArea(document: Y.Doc): PlannedArea {
   const elements = readVisibleElements(document);
   const bounds = readElementsBounds(elements);
   const width = 680;
@@ -448,8 +530,12 @@ function chooseAgentPlannedArea(document: Y.Doc): { x: number; y: number; width:
   };
 }
 
-function createDemoProposalElements(document: Y.Doc, request: AgentRunQueueRequest): Record<string, unknown>[] {
-  const area = chooseAgentPlannedArea(document);
+function createDemoProposalElements(
+  document: Y.Doc,
+  request: AgentRunQueueRequest,
+  plannedArea?: PlannedArea,
+): Record<string, unknown>[] {
+  const area = plannedArea ?? chooseAgentPlannedArea(document);
   const notePrompt = readLatestNotePrompt(document);
   const title = notePrompt ?? request.prompt.split("\n").find(Boolean) ?? "Agent proposal";
   const now = Date.now();
@@ -630,6 +716,37 @@ function readLatestNotePrompt(document: Y.Doc): string | null {
   return notes.at(-1) ?? null;
 }
 
+interface HumanSceneState {
+  elements: Record<string, unknown>[];
+  notes: unknown[];
+  signature: string;
+}
+
+function captureHumanSceneState(document: Y.Doc): HumanSceneState {
+  const elements = readVisibleElements(document).filter((element) => !isAgentManagedElement(element));
+  const notes = Object.values(document.getMap("notes").toJSON());
+  return {
+    elements,
+    notes,
+    signature: stableStringify({ elements, notes }),
+  };
+}
+
+function diffHumanSceneState(before: HumanSceneState, after: HumanSceneState): HumanDelta | null {
+  if (before.signature === after.signature) {
+    return null;
+  }
+
+  return {
+    changedAt: new Date().toISOString(),
+    summary: `human canvas changed: elements ${before.elements.length}->${after.elements.length}, notes ${before.notes.length}->${after.notes.length}`,
+    elementCountBefore: before.elements.length,
+    elementCountAfter: after.elements.length,
+    noteCountBefore: before.notes.length,
+    noteCountAfter: after.notes.length,
+  };
+}
+
 function readVisibleElements(document: Y.Doc): Record<string, unknown>[] {
   return document
     .getArray<Y.Map<unknown>>("elements")
@@ -681,6 +798,25 @@ function readElementsBounds(elements: Record<string, unknown>[]): {
 
 function truncate(value: string, maxLength: number): string {
   return value.length > maxLength ? `${value.slice(0, maxLength - 1)}…` : value;
+}
+
+function isAgentManagedElement(element: Record<string, unknown>): boolean {
+  const customData = element.customData;
+  if (!isRecord(customData)) {
+    return false;
+  }
+  const metadata = customData.excalidrawAgent;
+  return isRecord(metadata) && metadata.kind === "ghost";
+}
+
+function stableStringify(value: unknown): string {
+  if (Array.isArray(value)) {
+    return `[${value.map(stableStringify).join(",")}]`;
+  }
+  if (isRecord(value)) {
+    return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${stableStringify(value[key])}`).join(",")}}`;
+  }
+  return JSON.stringify(value);
 }
 
 function toCollabWebSocketUrl(serverUrl: string): string {
