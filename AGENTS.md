@@ -63,6 +63,13 @@ and keep the issue as decision history.
   root, confirm it creates or loads a file and navigates to `/files/:id`,
   confirm `Collab: synced`, confirm the footer shows `worker ready`, and then
   exercise the specific feature's end-to-end behavior.
+- For staged Agent proposal work, verification must include the staged lifecycle
+  artifacts and UI states that were changed: `estimate.json`, planned area,
+  at least one `draft-step-<n>.excalidraw` draft publish, `final.excalidraw`,
+  `derived.patch.json`, `quality-report.json`, final proposal display, and
+  Approve or Reject cleanup. If real Codex execution cannot be completed, state
+  exactly which stage could not be verified and keep the automated fake-runtime
+  coverage in place.
 - Before starting another dev server, check for existing listeners and avoid multiple Vite/server instances for the same app. If an old instance is stale or conflicting, stop it instead of starting a new one.
 - If the Portless proxy is not running, start the HTTP proxy with `pnpm dlx portless proxy start --port 1355 --no-tls` before running the portless tasks.
 - Use raw `mise run web` / `mise run server` only for narrow debugging, and explain why portless is not being used.

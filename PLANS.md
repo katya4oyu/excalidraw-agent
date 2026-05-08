@@ -135,6 +135,18 @@ type AgentRunRequest = {
 - Auto runは大規模な再構成を避け、add中心のproposalに制限する。
 - 明示的なmanual Runやinstruction-noteがある場合は、そのpromptを優先する。
 
+### 9. Staged Codex turn proposal lifecycle
+
+- WorkerはCodexを単発実行せず、`estimate -> draft steps -> verify/refine -> final proposal`の段階turnとして管理する。
+- Codexは最初に`runs/<runId>/estimate.json`へ、必要領域、意図、配置理由、作成stepを保存する。
+- WorkerはCodex見積もりをそのまま正にせず、既存要素、既存proposal/ghost除外、衝突回避、サイズ上限を踏まえて`plannedArea`を確定する。
+- Codexのdraft成果物は`runs/<runId>/draft-step-<n>.excalidraw`とし、Workerがstep完了ごとにdraft ghostとしてYjsへpublishする。要素単位streamingは初期scope外。
+- WorkerはCodex turn中もYjsを監視し、人間が変更したvisible elements/notes/assetsを`runs/<runId>/human-deltas.jsonl`へ記録し、次のCodex turnへhumanDeltaとして渡す。Agent自身のdraft/proposal/presence変更はhumanDeltaから除外する。
+- 最終成果物は従来通り`runs/<runId>/final.excalidraw`で、Workerは`derived.patch.json`を作りfinal proposal ghostへ変換する。
+- Workerは`runs/<runId>/quality-report.json`へ構造チェック、plannedAreaチェック、視認可能なadd要素の有無、refine有無を保存する。
+- 品質チェックが失敗した場合、Codexに1回だけrefine turnを送る。refine後も失敗した場合、不完全なproposalを成功扱いせずrunをfailedにする。
+- draft ghost、plannedArea overlay、Agent presenceはrunning中だけ見せ、proposal確定、approve、reject、failed、cancel後に残さない。
+
 ## Acceptance Criteria
 
 ### Worker lifecycle and triggers
@@ -174,11 +186,16 @@ type AgentRunRequest = {
 
 - WorkerはCodex run開始時にbase scene snapshotを固定する。
 - Workerはbase sceneからcanonical scene hashとelement version snapshotを作り、`baseRevision`としてrequest/proposal metadataへ保存する。
+- WorkerはCodex runを段階turnとして実行し、`estimate.json`、`draft-step-<n>.excalidraw`、`human-deltas.jsonl`、`quality-report.json`をWorker workspace配下に保存する。
+- WorkerはCodex見積もりを検証・補正して`plannedArea`を確定し、Yjs上の`agentRuns.phase`、`agentRuns.plannedArea`、`agentRuns.humanDeltaCount`を更新する。
+- Draftはstep単位でYjsへpublishされ、前stepのdraft ghostを置き換える。Draft ghostはfinal proposalとは区別され、`agentProposals`のpending proposalにはしない。
+- WorkerはCodex turn中に人間側のYjs変更を検知し、次turnのpromptにhumanDeltaとして含める。
 - Codexの正規成果物として`runs/<runId>/final.excalidraw`が作成される。
 - `runs/<runId>/...`の実体はリポジトリ外のWorker workspace配下に作成される。
 - Workerは`base-scene.json`と`final.excalidraw`を比較し、内部用の`derived.patch.json`を生成する。
 - 初期実装ではderived patchのadd operationを優先してproposal化し、update/delete/moveはunsupportedまたはconflictedに倒せる。
 - Proposalはghost要素としてキャンバス上に表示され、proposal metadataにrunId、requestId、source、base情報、createdAtが保存される。
+- Final proposal ghostは青い破線へ強制変換せず、元の図形スタイルを保った半透明・locked要素として表示する。
 - Approveはproposalを現在のsceneに適用し、ghost metadataを残さず通常要素へ昇格または既存要素へ反映する。
 - Rejectはghost proposalを見えない状態にし、footer/UIがproposal pendingとして残らない。
 - Proposal作成後に人間が競合する変更をした場合、Approve時にstale/conflictedとして扱える。
