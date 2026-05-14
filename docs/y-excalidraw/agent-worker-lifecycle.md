@@ -291,4 +291,3 @@ Worker完了時、`AgentSupervisor`はpersisted Yjs documentを読み込み、`a
 - 同じdocumentへの再接続ではworkerを再利用する。
 - active run中の2件目requestはqueuedのまま残る。
 - daemon workerはworkspaceを準備し、`ready` IPC messageを返す。
-

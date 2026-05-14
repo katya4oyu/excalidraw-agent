@@ -57,4 +57,3 @@ For `apps/web/DESIGN.md` changes, validate when network/package access allows:
 ```bash
 npx @google/design.md lint apps/web/DESIGN.md
 ```
-
