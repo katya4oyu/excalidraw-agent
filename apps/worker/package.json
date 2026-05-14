@@ -4,10 +4,12 @@
   "type": "module",
   "scripts": {
     "dev": "node --import tsx src/index.ts",
-    "typecheck": "tsc -p tsconfig.json"
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "node --experimental-strip-types --test src/**/*.test.ts"
   },
   "dependencies": {
     "@excalidraw-agent/shared": "workspace:*",
+    "@excalidraw-agent/y-excalidraw-agent": "workspace:*",
     "@hocuspocus/provider": "^4.0.0",
     "@openai/codex-sdk": "^0.125.0",
     "yjs": "^13.6.27"

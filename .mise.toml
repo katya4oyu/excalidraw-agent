@@ -22,21 +22,13 @@ run = "pnpm dev:web"
 description = "Start apps/worker"
 run = "pnpm dev:worker"
 
-[tasks."portless:server"]
-description = "Start apps/server through Portless at https://api.excalidraw-agent.localhost"
-run = "pnpm dlx portless api.excalidraw-agent pnpm dev:server"
+[tasks."server:portless"]
+description = "Start apps/server through Portless at http://api.excalidraw-agent.localhost:1355"
+run = "pnpm dlx portless proxy stop -p 1355 || true && pnpm dlx portless proxy start --port 1355 --no-tls && pnpm dlx portless --force api.excalidraw-agent pnpm dev:server"
 
-[tasks."portless:web"]
-description = "Start apps/web through Portless at https://excalidraw-agent.localhost"
-run = "VITE_SERVER_URL=$(pnpm dlx portless get api.excalidraw-agent) pnpm dlx portless excalidraw-agent pnpm dev:web"
-
-[tasks."portless:lan"]
-description = "Start the Portless LAN proxy on port 1355"
-run = "pnpm dlx portless proxy start --port 1355 --no-tls --lan --ip ${PORTLESS_LAN_IP:-192.168.201.76}"
-
-[tasks."portless:stop"]
-description = "Stop the Portless proxy on port 1355"
-run = "pnpm dlx portless proxy stop -p 1355"
+[tasks."web:portless"]
+description = "Start apps/web through Portless at http://excalidraw-agent.localhost:1355"
+run = "pnpm dlx portless proxy start --port 1355 --no-tls && VITE_SERVER_URL=http://api.excalidraw-agent.localhost:1355 VITE_COLLAB_URL=ws://api.excalidraw-agent.localhost:1355/collab pnpm dlx portless --force excalidraw-agent pnpm dev:web"
 
 [tasks.typecheck]
 description = "Typecheck all workspaces"

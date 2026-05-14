@@ -1,10 +1,10 @@
-# y-excalidraw-binding vendor decision
+# y-excalidraw vendor decision
 
 ## 背景
 
 Excalidraw Agent は、人間とagentが同じYjs document上でExcalidraw canvasを共同編集することを目的にしている。Web UIでは人間のpointer操作、selection、undo/redo、remote collaborator表示が必要であり、agent側では検証済みの図面変更をYjs documentへ反映する必要がある。
 
-このため、Excalidraw UIとYjsをつなぐbindingは単なる外部依存ではなく、human + agent共同編集の同期仕様を管理する境界になる。`@excalidraw-agent/y-excalidraw-binding` はOSSを自作扱いするためではなく、このプロジェクトの同期要件に合わせて責任を持って管理するためにvendor化する。
+このため、Excalidraw UIとYjsをつなぐbindingは単なる外部依存ではなく、human + agent共同編集の同期仕様を管理する境界になる。project-localな `y-excalidraw-*` packages はOSSを自作扱いするためではなく、このプロジェクトの同期要件に合わせて責任を持って管理するためにvendor化する。
 
 ## 3案比較
 
@@ -21,7 +21,7 @@ Excalidraw Agent は、人間とagentが同じYjs document上でExcalidraw canva
 
 ## 結論
 
-初期ベースには `mizuka-wu/y-excalidraw` forkを使い、`@excalidraw-agent/y-excalidraw-binding` としてproject-localに管理する。
+初期ベースには `mizuka-wu/y-excalidraw` forkを使い、`@excalidraw-agent/y-excalidraw-browser` を中心とするproject-localな `y-excalidraw-*` packages として管理する。
 
 本家 `RahulBadenkal/y-excalidraw` はOSS由来として最も明快だが、Excalidraw 0.18対応、optional assets、壊れたYjs要素への耐性、bulk deleteなど、現行webで必要な実用修正を再取り込みする負担が大きい。
 
@@ -64,7 +64,7 @@ Original license: MIT.
 
 ## 仕様方針
 
-`y-excalidraw-binding` はWeb UI用bindingとして、人間のExcalidraw操作をYjsへ反映し、remote Yjs更新をExcalidraw sceneへ反映する責務を持つ。agentが直接 `ExcalidrawBinding` を使うことは前提にしない。
+`y-excalidraw-browser` はWeb UI用bindingとして、人間のExcalidraw操作をYjsへ反映し、remote Yjs更新をExcalidraw sceneへ反映する責務を持つ。agentが直接 `ExcalidrawBinding` を使うことは前提にしない。
 
 agent/server向けには、同じYjs document schemaを扱うmutation helperを別途shared化する。特に `elements` の `pos` 生成、append、update、delete、move、sort順序はWeb bindingとagentで同じ仕様に揃える。
 

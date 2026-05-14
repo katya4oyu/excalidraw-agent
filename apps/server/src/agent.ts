@@ -1,53 +1,147 @@
-import { fileIdFromDocumentName, type AgentStatus, type FileId } from "@excalidraw-agent/shared";
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import type { AppDatabase } from "./db";
+import {
+  fileIdFromDocumentName,
+  type AgentRunQueueRequest,
+  type AgentStatus,
+  type AgentWorkerRequestMessage,
+  type AgentWorkerResponseMessage,
+  type FileId,
+} from "@excalidraw-agent/shared";
+import { fork, type ChildProcess } from "node:child_process";
+
+export interface WorkerHandle {
+  fileId: FileId;
+  ready: boolean;
+  busy: boolean;
+}
+
+interface WorkerProcessState extends WorkerHandle {
+  process: ChildProcess;
+  pending: AgentRunQueueRequest[];
+  activeRunId?: string;
+  stopping?: boolean;
+  idleStopTimer?: ReturnType<typeof setTimeout>;
+  idleStopPending?: boolean;
+}
+
+interface AgentSupervisorDatabase {
+  updateAgentStatus(id: FileId, status: AgentStatus): void;
+}
 
 export class AgentSupervisor {
-  private readonly processes = new Map<FileId, ChildProcessWithoutNullStreams>();
+  private readonly workers = new Map<FileId, WorkerProcessState>();
+  private readonly workerEntry = new URL("../../worker/src/index.ts", import.meta.url).pathname;
+  private readonly db: AgentSupervisorDatabase;
+  private readonly serverUrl: string;
+  private readonly idleWorkerGraceMs: number;
 
   constructor(
-    private readonly db: AppDatabase,
-    private readonly serverUrl: string,
-  ) {}
+    db: AgentSupervisorDatabase,
+    serverUrl: string,
+    idleWorkerGraceMs = 60_000,
+  ) {
+    this.db = db;
+    this.serverUrl = serverUrl;
+    this.idleWorkerGraceMs = idleWorkerGraceMs;
+  }
 
-  start(fileId: FileId, options: { prompt?: string } = {}): boolean {
-    if (this.processes.has(fileId)) {
-      return false;
+  ensureWorker(fileId: FileId): WorkerHandle {
+    const existing = this.workers.get(fileId);
+    if (existing) {
+      return toWorkerHandle(existing);
     }
 
-    const args = [
-      "--filter",
-      "@excalidraw-agent/worker",
-      "dev",
-      "--",
-      "--file-id",
-      fileId,
-      "--server-url",
-      this.serverUrl,
-    ];
-    if (options.prompt?.trim()) {
-      args.push("--prompt", options.prompt.trim());
-    }
-
-    const child = spawn(
-      "pnpm",
-      args,
+    const child = fork(
+      this.workerEntry,
+      [
+        "--daemon",
+        "--file-id",
+        fileId,
+        "--server-url",
+        this.serverUrl,
+      ],
       {
         env: {
           ...process.env,
           AGENT_PARENT: "server",
         },
+        execArgv: ["--import", "tsx"],
+        stdio: ["pipe", "pipe", "pipe", "ipc"],
       },
     );
+    const worker: WorkerProcessState = {
+      fileId,
+      ready: false,
+      busy: false,
+      pending: [],
+      process: child,
+    };
 
-    this.processes.set(fileId, child);
-    this.db.updateAgentStatus(fileId, "running");
-    this.watch(fileId, child);
+    this.workers.set(fileId, worker);
+    this.db.updateAgentStatus(fileId, "starting");
+    this.watch(worker);
+    return toWorkerHandle(worker);
+  }
+
+  enqueueRun(fileId: FileId, request: AgentRunQueueRequest): boolean {
+    const worker = this.workers.get(fileId) ?? this.ensureWorker(fileId);
+    const state = this.workers.get(worker.fileId);
+    if (!state || state.pending.some((pending) => pending.runId === request.runId)) {
+      return false;
+    }
+
+    state.pending.push(request);
+    this.flush(state);
     return true;
   }
 
-  isRunning(fileId: FileId): boolean {
-    return this.processes.has(fileId);
+  isWorkerReady(fileId: FileId): boolean {
+    return this.workers.get(fileId)?.ready ?? false;
+  }
+
+  isRunActive(fileId: FileId): boolean {
+    const worker = this.workers.get(fileId);
+    return Boolean(worker?.busy || worker?.pending.length);
+  }
+
+  stopIdleWorker(fileId: FileId, reason = "idle"): boolean {
+    const worker = this.workers.get(fileId);
+    if (!worker || worker.busy || worker.pending.length > 0) {
+      return false;
+    }
+
+    this.clearIdleStop(worker);
+    this.send(worker, { type: "shutdown", reason });
+    worker.stopping = true;
+    worker.process.disconnect();
+    worker.process.kill();
+    this.workers.delete(fileId);
+    this.db.updateAgentStatus(fileId, "idle");
+    return true;
+  }
+
+  scheduleIdleWorkerStop(fileId: FileId, reason = "idle"): void {
+    const worker = this.workers.get(fileId);
+    if (!worker) {
+      return;
+    }
+
+    this.clearIdleStop(worker);
+    worker.idleStopTimer = setTimeout(() => {
+      worker.idleStopTimer = undefined;
+      if (worker.busy || worker.pending.length > 0) {
+        worker.idleStopPending = true;
+        return;
+      }
+
+      this.stopIdleWorker(fileId, reason);
+    }, this.idleWorkerGraceMs);
+  }
+
+  cancelIdleWorkerStop(fileId: FileId): void {
+    const worker = this.workers.get(fileId);
+    if (worker) {
+      this.clearIdleStop(worker);
+    }
   }
 
   markFromDocumentName(documentName: string, status: AgentStatus): void {
@@ -57,20 +151,96 @@ export class AgentSupervisor {
     }
   }
 
-  private watch(fileId: FileId, child: ChildProcessWithoutNullStreams): void {
+  private watch(worker: WorkerProcessState): void {
     let stderr = "";
 
-    child.stderr.on("data", (chunk: Buffer) => {
-      stderr += chunk.toString("utf8");
+    worker.process.stdout?.on("data", (chunk: Buffer) => {
+      console.log(`[worker:${worker.fileId}] ${chunk.toString("utf8").trimEnd()}`);
     });
 
-    child.on("exit", (exitCode) => {
-      this.processes.delete(fileId);
+    worker.process.stderr?.on("data", (chunk: Buffer) => {
+      const text = chunk.toString("utf8");
+      stderr += text;
+      console.error(`[worker:${worker.fileId}] ${text.trimEnd()}`);
+    });
 
-      if (exitCode !== 0) {
-        console.error(`Worker for ${fileId} exited with ${exitCode}`, stderr);
-        this.db.updateAgentStatus(fileId, "failed");
+    worker.process.on("message", (message: AgentWorkerResponseMessage) => {
+      this.handleMessage(worker, message);
+    });
+
+    worker.process.on("exit", (exitCode) => {
+      this.workers.delete(worker.fileId);
+
+      if (!worker.stopping && exitCode !== 0) {
+        console.error(`Worker for ${worker.fileId} exited with ${exitCode}`, stderr);
+        this.db.updateAgentStatus(worker.fileId, "failed");
       }
     });
   }
+
+  private handleMessage(worker: WorkerProcessState, message: AgentWorkerResponseMessage): void {
+    if (message.fileId !== worker.fileId) {
+      return;
+    }
+
+    if (message.type === "ready") {
+      worker.ready = true;
+      this.db.updateAgentStatus(worker.fileId, worker.busy ? "running" : "idle");
+      this.flush(worker);
+      return;
+    }
+
+    if (message.type === "runStarted") {
+      worker.busy = true;
+      worker.activeRunId = message.runId;
+      this.db.updateAgentStatus(worker.fileId, "running");
+      return;
+    }
+
+    if (message.type === "runFinished" || message.type === "workerFailed") {
+      worker.busy = false;
+      worker.activeRunId = undefined;
+      this.db.updateAgentStatus(worker.fileId, message.type === "workerFailed" ? "failed" : "verified");
+      this.flush(worker);
+    }
+  }
+
+  private flush(worker: WorkerProcessState): void {
+    if (!worker.ready || worker.busy) {
+      return;
+    }
+
+    const request = worker.pending.shift();
+    if (!request) {
+      this.db.updateAgentStatus(worker.fileId, "idle");
+      if (worker.idleStopPending) {
+        this.stopIdleWorker(worker.fileId, "idle");
+      }
+      return;
+    }
+
+    worker.busy = true;
+    worker.activeRunId = request.runId;
+    this.send(worker, { type: "runQueued", fileId: worker.fileId, request });
+  }
+
+  private send(worker: WorkerProcessState, message: AgentWorkerRequestMessage): void {
+    if (worker.process.connected) {
+      worker.process.send(message);
+    }
+  }
+
+  private clearIdleStop(worker: WorkerProcessState): void {
+    if (worker.idleStopTimer) {
+      clearTimeout(worker.idleStopTimer);
+      worker.idleStopTimer = undefined;
+    }
+    worker.idleStopPending = false;
+  }
 }
+
+const toWorkerHandle = (worker: WorkerProcessState): WorkerHandle => ({
+  busy: worker.busy,
+  fileId: worker.fileId,
+  ready: worker.ready,
+});

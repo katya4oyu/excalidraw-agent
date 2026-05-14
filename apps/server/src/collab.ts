@@ -2,8 +2,13 @@ import { Hocuspocus } from "@hocuspocus/server";
 import * as Y from "yjs";
 import { randomUUID } from "node:crypto";
 import {
+  type AgentRunRequest,
+  type AgentRunQueueRequest,
   fileIdFromDocumentName,
   getAgentInstructionPrompt,
+  getNoteEmbedMetadata,
+  getNoteText,
+  normalizeExcalidrawElementPositions,
   type CollabDocumentName,
   type FileId,
 } from "@excalidraw-agent/shared";
@@ -14,14 +19,46 @@ interface CollabDatabase {
 }
 
 interface CollabAgentSupervisor extends AgentInstructionStarter {
+  ensureWorker(fileId: FileId): unknown;
   markFromDocumentName(documentName: string, status: "verified"): void;
+  scheduleIdleWorkerStop(fileId: FileId): void;
+  cancelIdleWorkerStop(fileId: FileId): void;
 }
 
 export const createCollabServer = (db: CollabDatabase, agents: CollabAgentSupervisor): Hocuspocus => {
+  const connectionCounts = new Map<FileId, number>();
+
   return new Hocuspocus({
     name: "excalidraw-agent-collab",
     debounce: 500,
     maxDebounce: 2_000,
+
+    async connected({ documentName, requestParameters }) {
+      const fileId = fileIdFromDocumentName(documentName);
+      if (!fileId || isWorkerConnection(requestParameters)) {
+        return;
+      }
+
+      connectionCounts.set(fileId, (connectionCounts.get(fileId) ?? 0) + 1);
+      agents.cancelIdleWorkerStop(fileId);
+      agents.ensureWorker(fileId);
+    },
+
+    async onDisconnect({ documentName, requestParameters }) {
+      const fileId = fileIdFromDocumentName(documentName);
+      if (!fileId || isWorkerConnection(requestParameters)) {
+        return;
+      }
+
+      const nextCount = Math.max((connectionCounts.get(fileId) ?? 1) - 1, 0);
+      if (nextCount > 0) {
+        connectionCounts.set(fileId, nextCount);
+        return;
+      }
+
+      connectionCounts.delete(fileId);
+      agents.scheduleIdleWorkerStop(fileId);
+    },
 
     async onLoadDocument({ documentName }) {
       const persisted = db.loadDocument(documentName as CollabDocumentName);
@@ -30,6 +67,7 @@ export const createCollabServer = (db: CollabDatabase, agents: CollabAgentSuperv
       if (persisted) {
         Y.applyUpdate(ydoc, persisted);
       }
+      normalizeExcalidrawElementPositions(ydoc);
 
       const fileId = fileIdFromDocumentName(documentName);
       if (fileId) {
@@ -50,7 +88,7 @@ export const createCollabServer = (db: CollabDatabase, agents: CollabAgentSuperv
         startAgentFromInstructionRequests(document, fileId, agents);
       }
 
-      if (!fileId || !agents.isRunning(fileId)) {
+      if (!fileId || !agents.isRunActive(fileId)) {
         agents.markFromDocumentName(documentName, "verified");
       }
     },
@@ -58,8 +96,9 @@ export const createCollabServer = (db: CollabDatabase, agents: CollabAgentSuperv
 };
 
 interface AgentInstructionStarter {
-  isRunning(fileId: FileId): boolean;
-  start(fileId: FileId, options: { prompt?: string }): boolean;
+  enqueueRun(fileId: FileId, request: AgentRunQueueRequest): boolean;
+  ensureWorker(fileId: FileId): unknown;
+  isRunActive(fileId: FileId): boolean;
 }
 
 export const startAgentFromInstructionRequests = (
@@ -67,12 +106,17 @@ export const startAgentFromInstructionRequests = (
   fileId: FileId,
   agents: AgentInstructionStarter,
 ): void => {
-  if (agents.isRunning(fileId)) {
+  agents.ensureWorker(fileId);
+
+  if (agents.isRunActive(fileId)) {
     return;
   }
 
-  const requests = document.getMap<Record<string, unknown>>("agentInstructionRequests");
+  const runRequests = document.getMap<Record<string, unknown>>("agentRunRequests");
+  const legacyRequests = document.getMap<Record<string, unknown>>("agentInstructionRequests");
   const agentRuns = document.getMap<Record<string, unknown>>("agentRuns");
+  const notes = document.getMap<Record<string, unknown>>("notes");
+  const legacyInstructionNotes = document.getMap<Record<string, unknown>>("agentInstructionNotes");
   const elementsById = new Map<string, unknown>();
   for (const item of document.getArray<Y.Map<unknown>>("elements").toArray()) {
     const element = item.get("el");
@@ -81,44 +125,71 @@ export const startAgentFromInstructionRequests = (
     }
   }
 
-  for (const [requestId, request] of requests.entries()) {
-    if (!isQueuedInstructionRequest(request)) {
+  const candidates = [
+    ...Array.from(runRequests.entries()).map(([requestId, request]) => ({
+      requestId,
+      request,
+      store: runRequests,
+    })),
+    ...Array.from(legacyRequests.entries()).map(([requestId, request]) => ({
+      requestId,
+      request: normalizeLegacyRequest(fileId, request),
+      store: legacyRequests,
+    })),
+  ];
+
+  for (const { requestId, request, store } of candidates) {
+    if (!isQueuedAgentRunRequest(request)) {
       continue;
     }
 
-    const element = elementsById.get(request.elementId);
-    const currentPrompt = getAgentInstructionPrompt(element);
-    if (currentPrompt !== request.prompt) {
-      requests.set(requestId, {
-        ...request,
-        status: "stale",
-        updatedAt: Date.now(),
+    const instructionRequest = request.source === "instruction-note" ? request as QueuedInstructionRequest : null;
+    if (instructionRequest) {
+      const currentPrompt = getCurrentInstructionPrompt(instructionRequest, {
+        elementsById,
+        legacyInstructionNotes,
+        notes,
       });
-      continue;
-    }
-
-    const started = agents.start(fileId, { prompt: request.prompt });
-    if (!started) {
-      return;
+      if (currentPrompt !== request.prompt) {
+        store.set(requestId, {
+          ...request,
+          status: "stale",
+          updatedAt: Date.now(),
+        });
+        continue;
+      }
     }
 
     const now = Date.now();
     const runId = `agent-run-${randomUUID()}`;
+    const queued = agents.enqueueRun(fileId, {
+      fileId,
+      prompt: request.prompt,
+      requestId,
+      runId,
+    });
+    if (!queued) {
+      return;
+    }
+
     document.transact(() => {
-      requests.set(requestId, {
+      const runningRequest = {
+        ...request,
         status: "running",
-        source: "instruction-note",
-        prompt: request.prompt,
         runId,
-        elementId: request.elementId,
-        createdAt: request.createdAt,
         updatedAt: now,
-      });
+      };
+      runRequests.set(requestId, runningRequest);
+      if (store !== runRequests) {
+        store.set(requestId, runningRequest);
+      }
       agentRuns.set(runId, {
         status: "running",
-        source: "instruction-note",
+        source: request.source,
         prompt: request.prompt,
-        instructionElementIds: [request.elementId],
+        ...(instructionRequest?.elementId ? { instructionElementIds: [instructionRequest.elementId] } : {}),
+        ...(instructionRequest?.noteId ? { sourceNoteId: instructionRequest.noteId } : {}),
+        ...(instructionRequest?.sourceNoteId ? { sourceNoteId: instructionRequest.sourceNoteId } : {}),
         createdAt: now,
         updatedAt: now,
       });
@@ -127,24 +198,116 @@ export const startAgentFromInstructionRequests = (
   }
 };
 
+const getCurrentInstructionPrompt = (
+  request: QueuedInstructionRequest,
+  stores: {
+    elementsById: Map<string, unknown>;
+    legacyInstructionNotes: Y.Map<Record<string, unknown>>;
+    notes: Y.Map<Record<string, unknown>>;
+  },
+): string | null => {
+  const noteId = request.sourceNoteId ?? request.noteId;
+  if (noteId) {
+    return (
+      getNoteText(stores.notes.get(noteId) ?? stores.legacyInstructionNotes.get(noteId)) ??
+      getNoteEmbedMetadata(stores.elementsById.get(noteId))?.text?.trim() ??
+      null
+    );
+  }
+
+  if (request.elementId) {
+    return getAgentInstructionPrompt(stores.elementsById.get(request.elementId));
+  }
+
+  return null;
+};
+
 const isRecord = (value: unknown): value is Record<string, unknown> => {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 };
 
-const isQueuedInstructionRequest = (value: unknown): value is {
+const isWorkerConnection = (requestParameters: URLSearchParams): boolean => {
+  return requestParameters.get("source") === "worker";
+};
+
+type QueuedInstructionRequest = AgentRunRequest & {
   createdAt: number;
-  elementId: string;
+  elementId?: string;
+  noteId?: string;
+  sourceNoteId?: string;
   prompt: string;
   source: "instruction-note";
   status: "queued";
-} => {
+};
+
+type QueuedAgentRequest = (AgentRunRequest | QueuedInstructionRequest) & { status: "queued" };
+
+const isQueuedAgentRunRequest = (value: unknown): value is QueuedAgentRequest => {
+  if (!isRecord(value) || value.status !== "queued" || typeof value.prompt !== "string" || !value.prompt.trim()) {
+    return false;
+  }
+
+  if (
+    value.source === "api" ||
+    value.source === "manual" ||
+    value.source === "auto-idle"
+  ) {
+    return typeof value.createdAt === "number" && typeof value.fileId === "string";
+  }
+
   return (
-    isRecord(value) &&
-    value.status === "queued" &&
     value.source === "instruction-note" &&
-    typeof value.prompt === "string" &&
-    value.prompt.trim().length > 0 &&
-    typeof value.elementId === "string" &&
+    (
+      typeof value.elementId === "string" ||
+      typeof value.noteId === "string" ||
+      typeof value.sourceNoteId === "string"
+    ) &&
     typeof value.createdAt === "number"
   );
+};
+
+const normalizeLegacyRequest = (fileId: FileId, value: unknown): unknown => {
+  if (!isRecord(value) || value.status !== "queued" || typeof value.prompt !== "string") {
+    return value;
+  }
+
+  const now = typeof value.createdAt === "number" ? value.createdAt : Date.now();
+  if (value.schemaVersion === 1 && typeof value.fileId === "string") {
+    return value;
+  }
+
+  if (value.source === "api") {
+    return {
+      schemaVersion: 1,
+      status: "queued",
+      source: "api",
+      prompt: value.prompt,
+      fileId,
+      trigger: { type: "api" },
+      createdAt: now,
+      updatedAt: typeof value.updatedAt === "number" ? value.updatedAt : now,
+    } satisfies AgentRunRequest;
+  }
+
+  if (value.source === "instruction-note") {
+    return {
+      schemaVersion: 1,
+      status: "queued",
+      source: "instruction-note",
+      prompt: value.prompt,
+      fileId,
+      trigger: { type: "instruction-note" },
+      ...(typeof value.elementId === "string" ? { elementId: value.elementId } : {}),
+      ...(typeof value.noteId === "string" ? { noteId: value.noteId } : {}),
+      ...(typeof value.sourceNoteId === "string" ? { sourceNoteId: value.sourceNoteId } : {}),
+      createdAt: now,
+      updatedAt: typeof value.updatedAt === "number" ? value.updatedAt : now,
+    } satisfies AgentRunRequest & {
+      elementId?: string;
+      noteId?: string;
+      sourceNoteId?: string;
+    };
+  }
+
+  return value;
 };
