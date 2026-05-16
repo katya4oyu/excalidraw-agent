@@ -6,9 +6,11 @@
 
 1. [Concept](./concept.md)
 2. [Architecture](./architecture.md)
-3. [y-excalidraw package architecture](./y-excalidraw/package-architecture.md)
-4. [Agent rebase apply design](./y-excalidraw/agent-rebase-apply.md)
-5. [y-excalidraw vendor decision](./y-excalidraw/vendor-decision.md)
+3. [Feature overview HTML](./feature-overview.html)
+4. [Implementation specification](./specification.md)
+5. [y-excalidraw package architecture](./y-excalidraw/package-architecture.md)
+6. [Agent rebase apply design](./y-excalidraw/agent-rebase-apply.md)
+7. [y-excalidraw vendor decision](./y-excalidraw/vendor-decision.md)
 
 ## 配置方針
 

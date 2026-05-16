@@ -1,0 +1,743 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Excalidraw Agent Feature Overview</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --ink: #202124;
+        --muted: #5f6368;
+        --line: #d9dce1;
+        --paper: #fbfbf8;
+        --panel: #ffffff;
+        --green: #246b5b;
+        --green-soft: #e4f3ee;
+        --indigo: #4d4aa8;
+        --indigo-soft: #ecebff;
+        --amber: #8a6519;
+        --amber-soft: #fff4cf;
+        --rose: #a33a48;
+        --rose-soft: #ffe7eb;
+        --blue: #2f6690;
+        --blue-soft: #e7f2fb;
+        --shadow: 0 16px 48px rgba(32, 33, 36, 0.08);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        background: var(--paper);
+        color: var(--ink);
+        font-family:
+          Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+          "Segoe UI", "Hiragino Sans", "Yu Gothic", sans-serif;
+        line-height: 1.65;
+      }
+
+      main {
+        max-width: 1180px;
+        margin: 0 auto;
+        padding: 40px 24px 80px;
+      }
+
+      .hero {
+        display: grid;
+        grid-template-columns: minmax(0, 1.08fr) minmax(320px, 0.92fr);
+        gap: 32px;
+        align-items: end;
+        min-height: 520px;
+        padding: 44px 0 24px;
+      }
+
+      .eyebrow {
+        margin: 0 0 14px;
+        color: var(--indigo);
+        font-size: 13px;
+        font-weight: 750;
+        letter-spacing: 0;
+        text-transform: uppercase;
+      }
+
+      h1 {
+        margin: 0;
+        max-width: 760px;
+        font-size: clamp(42px, 7vw, 88px);
+        line-height: 0.96;
+        letter-spacing: 0;
+      }
+
+      .lead {
+        max-width: 660px;
+        margin: 26px 0 0;
+        color: var(--muted);
+        font-size: 19px;
+      }
+
+      .hero-board {
+        position: relative;
+        min-height: 420px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background:
+          linear-gradient(#eef0f4 1px, transparent 1px),
+          linear-gradient(90deg, #eef0f4 1px, transparent 1px),
+          #fffdf8;
+        background-size: 28px 28px;
+        box-shadow: var(--shadow);
+        overflow: hidden;
+      }
+
+      .canvas-note,
+      .canvas-shape,
+      .canvas-proposal,
+      .canvas-footer {
+        position: absolute;
+        border-radius: 8px;
+        box-shadow: 0 8px 20px rgba(32, 33, 36, 0.08);
+      }
+
+      .canvas-note {
+        left: 34px;
+        top: 34px;
+        width: 220px;
+        min-height: 116px;
+        padding: 16px;
+        background: var(--amber-soft);
+        border: 1px solid #dfbd67;
+        color: #4c3910;
+        font-size: 14px;
+      }
+
+      .canvas-shape {
+        right: 38px;
+        top: 58px;
+        width: 142px;
+        height: 86px;
+        background: var(--blue-soft);
+        border: 2px solid var(--blue);
+      }
+
+      .canvas-shape::after {
+        content: "";
+        position: absolute;
+        left: -72px;
+        top: 35px;
+        width: 72px;
+        border-top: 2px solid var(--blue);
+      }
+
+      .canvas-proposal {
+        right: 42px;
+        bottom: 88px;
+        width: 238px;
+        min-height: 148px;
+        padding: 16px;
+        background: var(--indigo-soft);
+        border: 2px dashed var(--indigo);
+        color: #302d7a;
+        opacity: 0.92;
+      }
+
+      .canvas-proposal strong {
+        display: block;
+        margin-bottom: 8px;
+      }
+
+      .canvas-footer {
+        left: 22px;
+        right: 22px;
+        bottom: 18px;
+        display: flex;
+        gap: 10px;
+        align-items: center;
+        padding: 10px;
+        background: rgba(255, 255, 255, 0.92);
+        border: 1px solid var(--line);
+      }
+
+      .tool {
+        display: inline-grid;
+        place-items: center;
+        min-width: 40px;
+        height: 34px;
+        border: 1px solid var(--line);
+        border-radius: 7px;
+        background: #fff;
+        color: var(--ink);
+        font-weight: 700;
+      }
+
+      .tool.run {
+        width: auto;
+        padding: 0 14px;
+        background: var(--green);
+        border-color: var(--green);
+        color: #fff;
+      }
+
+      section {
+        margin-top: 72px;
+      }
+
+      .section-head {
+        display: flex;
+        justify-content: space-between;
+        gap: 28px;
+        align-items: end;
+        margin-bottom: 22px;
+      }
+
+      h2 {
+        margin: 0;
+        font-size: clamp(28px, 4vw, 44px);
+        line-height: 1.08;
+        letter-spacing: 0;
+      }
+
+      .section-note {
+        max-width: 440px;
+        margin: 0;
+        color: var(--muted);
+      }
+
+      .grid-3 {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 16px;
+      }
+
+      .card {
+        min-height: 196px;
+        padding: 22px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--panel);
+      }
+
+      .card h3,
+      .lane h3 {
+        margin: 0 0 12px;
+        font-size: 18px;
+        line-height: 1.25;
+      }
+
+      .card p {
+        margin: 0;
+        color: var(--muted);
+      }
+
+      .tag {
+        display: inline-flex;
+        align-items: center;
+        height: 26px;
+        margin-bottom: 16px;
+        padding: 0 9px;
+        border-radius: 999px;
+        font-size: 12px;
+        font-weight: 750;
+      }
+
+      .tag.human { background: var(--green-soft); color: var(--green); }
+      .tag.agent { background: var(--indigo-soft); color: var(--indigo); }
+      .tag.system { background: var(--blue-soft); color: var(--blue); }
+      .tag.review { background: var(--amber-soft); color: var(--amber); }
+      .tag.limit { background: var(--rose-soft); color: var(--rose); }
+
+      .flow {
+        display: grid;
+        grid-template-columns: 1fr 42px 1fr 42px 1fr 42px 1fr;
+        gap: 10px;
+        align-items: stretch;
+      }
+
+      .step {
+        padding: 18px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--panel);
+      }
+
+      .step .num {
+        display: grid;
+        place-items: center;
+        width: 34px;
+        height: 34px;
+        margin-bottom: 14px;
+        border-radius: 50%;
+        background: var(--ink);
+        color: #fff;
+        font-size: 14px;
+        font-weight: 800;
+      }
+
+      .step h3 {
+        margin: 0 0 8px;
+        font-size: 17px;
+      }
+
+      .step p {
+        margin: 0;
+        color: var(--muted);
+        font-size: 14px;
+      }
+
+      .arrow {
+        display: grid;
+        place-items: center;
+        color: var(--muted);
+        font-size: 28px;
+      }
+
+      .system-map {
+        display: grid;
+        grid-template-columns: 1fr 1fr 1fr;
+        gap: 16px;
+      }
+
+      .lane {
+        min-height: 430px;
+        padding: 18px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: #fff;
+      }
+
+      .module {
+        margin-top: 14px;
+        padding: 14px;
+        border-radius: 8px;
+        border: 1px solid var(--line);
+        background: #f8f9fa;
+      }
+
+      .module strong {
+        display: block;
+        margin-bottom: 4px;
+      }
+
+      .module span {
+        color: var(--muted);
+        font-size: 14px;
+      }
+
+      .connector {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin: 12px 0;
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .connector::before,
+      .connector::after {
+        content: "";
+        flex: 1;
+        border-top: 1px solid var(--line);
+      }
+
+      .timeline {
+        display: grid;
+        gap: 12px;
+      }
+
+      .timeline-row {
+        display: grid;
+        grid-template-columns: 190px 1fr;
+        gap: 18px;
+        align-items: start;
+      }
+
+      .phase {
+        padding: 14px 16px;
+        border-radius: 8px;
+        border: 1px solid var(--line);
+        background: #fff;
+        font-weight: 750;
+      }
+
+      .detail {
+        padding: 14px 16px;
+        border-left: 4px solid var(--indigo);
+        background: var(--indigo-soft);
+        border-radius: 0 8px 8px 0;
+      }
+
+      .detail p {
+        margin: 0;
+        color: #343071;
+      }
+
+      .matrix {
+        display: grid;
+        grid-template-columns: 1.1fr 1fr 1fr 1fr;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        overflow: hidden;
+        background: #fff;
+      }
+
+      .matrix div {
+        min-height: 72px;
+        padding: 14px;
+        border-right: 1px solid var(--line);
+        border-bottom: 1px solid var(--line);
+      }
+
+      .matrix div:nth-child(4n) {
+        border-right: 0;
+      }
+
+      .matrix div:nth-last-child(-n + 4) {
+        border-bottom: 0;
+      }
+
+      .matrix .head {
+        min-height: 52px;
+        background: #f1f3f4;
+        font-weight: 800;
+      }
+
+      .matrix .muted {
+        color: var(--muted);
+      }
+
+      .callout {
+        margin-top: 18px;
+        padding: 18px 20px;
+        border: 1px solid #e5c86e;
+        border-radius: 8px;
+        background: var(--amber-soft);
+        color: #4f3b12;
+      }
+
+      .mini {
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      @media (max-width: 900px) {
+        main {
+          padding: 24px 16px 64px;
+        }
+
+        .hero,
+        .grid-3,
+        .system-map {
+          grid-template-columns: 1fr;
+        }
+
+        .hero {
+          min-height: 0;
+        }
+
+        .section-head {
+          display: block;
+        }
+
+        .section-note {
+          margin-top: 12px;
+        }
+
+        .flow {
+          grid-template-columns: 1fr;
+        }
+
+        .arrow {
+          min-height: 26px;
+          transform: rotate(90deg);
+        }
+
+        .timeline-row {
+          grid-template-columns: 1fr;
+          gap: 8px;
+        }
+
+        .matrix {
+          grid-template-columns: 1fr;
+        }
+
+        .matrix div,
+        .matrix div:nth-child(4n),
+        .matrix div:nth-last-child(-n + 4) {
+          border-right: 0;
+          border-bottom: 1px solid var(--line);
+        }
+
+        .matrix div:last-child {
+          border-bottom: 0;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header class="hero">
+        <div>
+          <p class="eyebrow">Feature overview</p>
+          <h1>ExcalidrawにAgentが参加し、提案をghostとして見せる</h1>
+          <p class="lead">
+            人間はいつも通りcanvasを編集する。Agentは同じYjs documentを読み、別ワークスペースで図を作り、
+            いきなり本体を書き換えずに「承認待ちの提案」としてcanvasへ表示する。
+          </p>
+        </div>
+        <div class="hero-board" aria-label="Excalidraw Agent概念図">
+          <div class="canvas-note">
+            <strong>Note</strong><br>
+            「この構成をデプロイ図にして」
+          </div>
+          <div class="canvas-shape"></div>
+          <div class="canvas-proposal">
+            <strong>Agent ghost proposal</strong>
+            半透明・lockedの要素として表示。Approveするまで通常要素にはならない。
+          </div>
+          <div class="canvas-footer">
+            <span class="tool">✎</span>
+            <span class="tool">□</span>
+            <span class="tool run">Run</span>
+            <span class="tool">✓</span>
+            <span class="tool">×</span>
+          </div>
+        </div>
+      </header>
+
+      <section>
+        <div class="section-head">
+          <h2>何ができるか</h2>
+          <p class="section-note">
+            機能は「共同編集」「Agent実行」「レビューして反映」の3つに分けると見通しやすい。
+          </p>
+        </div>
+        <div class="grid-3">
+          <article class="card">
+            <span class="tag human">Human canvas</span>
+            <h3>ブラウザでExcalidrawを編集</h3>
+            <p>
+              `/files/{fileId}` を開くとHocuspocusへ接続し、Excalidraw要素をYjs documentへ同期する。
+              image挿入、Note embeddable、appState復元にも対応する。
+            </p>
+          </article>
+          <article class="card">
+            <span class="tag agent">Agent run</span>
+            <h3>Run buttonやauto modeで依頼</h3>
+            <p>
+              promptは `agentRunRequests` に入り、serverがworkerへ渡す。workerはCodexで
+              estimate、draft、final artifactを作る。
+            </p>
+          </article>
+          <article class="card">
+            <span class="tag review">Review</span>
+            <h3>提案はghostとして出る</h3>
+            <p>
+              Agentの成果物は半透明のghost elementとしてcanvasに追加される。
+              人間がApproveすると通常要素へ昇格し、Rejectすると削除扱いになる。
+            </p>
+          </article>
+        </div>
+      </section>
+
+      <section>
+        <div class="section-head">
+          <h2>ユーザー体験の流れ</h2>
+          <p class="section-note">
+            Agentは直接canvasを破壊的に上書きしない。まず別成果物を作り、差分を提案として戻す。
+          </p>
+        </div>
+        <div class="flow">
+          <div class="step">
+            <div class="num">1</div>
+            <h3>Fileを開く</h3>
+            <p>Homeが `/api/files` でIDを作り、`/files/{fileId}` へ遷移する。</p>
+          </div>
+          <div class="arrow">→</div>
+          <div class="step">
+            <div class="num">2</div>
+            <h3>Canvasを編集</h3>
+            <p>Excalidraw操作はYjsの `elements`、`assets`、`appState` に同期される。</p>
+          </div>
+          <div class="arrow">→</div>
+          <div class="step">
+            <div class="num">3</div>
+            <h3>Agentに依頼</h3>
+            <p>Run button、auto mode、legacy instructionからqueued requestが作られる。</p>
+          </div>
+          <div class="arrow">→</div>
+          <div class="step">
+            <div class="num">4</div>
+            <h3>提案を承認</h3>
+            <p>ghost proposalを確認し、ApproveまたはRejectで本体への反映を決める。</p>
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <div class="section-head">
+          <h2>内部構成</h2>
+          <p class="section-note">
+            3つのアプリと4つのpackagesが、Yjs documentを中心に役割分担している。
+          </p>
+        </div>
+        <div class="system-map">
+          <div class="lane">
+            <span class="tag human">apps/web</span>
+            <h3>Browser UI</h3>
+            <div class="module">
+              <strong>Excalidraw</strong>
+              <span>人間の描画、画像挿入、Note表示、footer tools。</span>
+            </div>
+            <div class="module">
+              <strong>HocuspocusProvider</strong>
+              <span>Yjs documentとawarenessを同期する。</span>
+            </div>
+            <div class="module">
+              <strong>Proposal controls</strong>
+              <span>最新proposalをapprove/rejectする。</span>
+            </div>
+          </div>
+
+          <div class="lane">
+            <span class="tag system">apps/server</span>
+            <h3>Coordination</h3>
+            <div class="module">
+              <strong>Hono API</strong>
+              <span>file作成、import、status、agent run queue。</span>
+            </div>
+            <div class="module">
+              <strong>Hocuspocus</strong>
+              <span>Yjs documentをload/storeし、変更時にrequestを検出。</span>
+            </div>
+            <div class="module">
+              <strong>AgentSupervisor</strong>
+              <span>fileごとのworker processを起動・監視する。</span>
+            </div>
+          </div>
+
+          <div class="lane">
+            <span class="tag agent">apps/worker</span>
+            <h3>Agent Runtime</h3>
+            <div class="module">
+              <strong>Workspace</strong>
+              <span>`~/.excalidraw-agent/{fileId}` にrun artifactを保存。</span>
+            </div>
+            <div class="module">
+              <strong>Codex SDK</strong>
+              <span>estimate、draft、final.excalidrawを作成。</span>
+            </div>
+            <div class="module">
+              <strong>Proposal pipeline</strong>
+              <span>baseとの差分からghost proposalをpublish。</span>
+            </div>
+          </div>
+        </div>
+        <div class="connector">shared packages: IDs, metadata, Yjs element helpers, proposal helpers</div>
+      </section>
+
+      <section>
+        <div class="section-head">
+          <h2>Agent run の中身</h2>
+          <p class="section-note">
+            workerは一気に最終結果だけを出すのではなく、見積もり、draft、品質チェックを段階的に行う。
+          </p>
+        </div>
+        <div class="timeline">
+          <div class="timeline-row">
+            <div class="phase">queued → running</div>
+            <div class="detail"><p>`agentRunRequests` から1件取り出し、`agentRuns[runId]` を作る。</p></div>
+          </div>
+          <div class="timeline-row">
+            <div class="phase">snapshot</div>
+            <div class="detail"><p>現在のcanvas、assets、notesを `base-scene.json` として保存し、base revisionを計算する。</p></div>
+          </div>
+          <div class="timeline-row">
+            <div class="phase">estimate</div>
+            <div class="detail"><p>Codexが必要領域と作業stepsを `estimate.json` に書く。workerが衝突しにくいplanned areaへ調整する。</p></div>
+          </div>
+          <div class="timeline-row">
+            <div class="phase">drafting</div>
+            <div class="detail"><p>stepごとに `draft-step-n.excalidraw` を作り、途中結果をdraft ghostとして表示できる。</p></div>
+          </div>
+          <div class="timeline-row">
+            <div class="phase">verifying</div>
+            <div class="detail"><p>`final.excalidraw` を読み、構造、要素数、planned areaとの重なりを確認する。失敗時は1回だけ修正turnを行う。</p></div>
+          </div>
+          <div class="timeline-row">
+            <div class="phase">proposed</div>
+            <div class="detail"><p>baseとfinalの差分からadd proposalを作り、半透明のghost elementとしてYjsへpublishする。</p></div>
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <div class="section-head">
+          <h2>データの置き場所</h2>
+          <p class="section-note">
+            同じcanvasに関係する情報でも、図面本体、metadata、ローカル成果物は分けている。
+          </p>
+        </div>
+        <div class="matrix">
+          <div class="head">場所</div>
+          <div class="head">中身</div>
+          <div class="head">誰が書くか</div>
+          <div class="head">用途</div>
+
+          <div><strong>Yjs `elements`</strong></div>
+          <div class="muted">Excalidraw要素、ghost proposal</div>
+          <div class="muted">web / worker</div>
+          <div class="muted">共同編集とcanvas表示</div>
+
+          <div><strong>Yjs metadata maps</strong></div>
+          <div class="muted">requests、runs、proposals、notes、settings</div>
+          <div class="muted">web / server / worker</div>
+          <div class="muted">Agent状態、レビュー、Note管理</div>
+
+          <div><strong>SQLite</strong></div>
+          <div class="muted">file metadata、encoded Yjs document</div>
+          <div class="muted">server</div>
+          <div class="muted">再起動後の復元</div>
+
+          <div><strong>worker workspace</strong></div>
+          <div class="muted">base-scene、estimate、draft、final、quality report</div>
+          <div class="muted">worker / Codex</div>
+          <div class="muted">Agent作業の中間成果物</div>
+        </div>
+      </section>
+
+      <section>
+        <div class="section-head">
+          <h2>今の制約</h2>
+          <p class="section-note">
+            この資料は現実装ベースなので、できないことも明示しておく。
+          </p>
+        </div>
+        <div class="grid-3">
+          <article class="card">
+            <span class="tag limit">Apply</span>
+            <h3>反映はadd中心</h3>
+            <p>update、delete、moveはpatchとして検出されるが、approve時はconflict/stale側へ倒す。</p>
+          </article>
+          <article class="card">
+            <span class="tag limit">Model</span>
+            <h3>UIのmodel選択は未接続</h3>
+            <p>footerにはmodel selectがあるが、workerは現在 `gpt-5.3-codex-spark` 固定で動く。</p>
+          </article>
+          <article class="card">
+            <span class="tag limit">Quality</span>
+            <h3>視覚QAは構造チェック中心</h3>
+            <p>final artifactの存在、visible add要素、planned area重なりを確認する。rendered visual QAはまだない。</p>
+          </article>
+        </div>
+        <div class="callout">
+          <strong>読み方:</strong>
+          まずこのHTMLで機能の全体像を掴み、詳細な型やAPIの正確な仕様は
+          <code>docs/specification.md</code> を参照する。
+        </div>
+        <p class="mini">Generated from the current codebase documentation and implementation.</p>
+      </section>
+    </main>
+  </body>
+</html>
